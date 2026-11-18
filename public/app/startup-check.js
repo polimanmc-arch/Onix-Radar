@@ -26,6 +26,7 @@
     // Layer 3 — Workflows (must follow engine)
     ['StockScannerCore.createRuleEvaluator',    window.StockScannerCore?.createRuleEvaluator],
     ['StockScannerCore.computeSignalPerformance', window.StockScannerCore?.computeSignalPerformance],
+    ['StockScannerCore.evaluateAlert',          window.StockScannerCore?.evaluateAlert],
     ['StockScannerCore.runScanWorkflow',        window.StockScannerCore?.runScanWorkflow],
     ['StockScannerCore.runBacktestWorkflow',    window.StockScannerCore?.runBacktestWorkflow],
     ['StockScannerCore.buildPortfolioWorkflow', window.StockScannerCore?.buildPortfolioWorkflow],

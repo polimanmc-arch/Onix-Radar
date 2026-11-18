@@ -1,0 +1,42 @@
+name: Alertas Telegram
+
+on:
+  schedule:
+    # Lunes a viernes 21:30 UTC: después del cierre de Wall Street todo el año
+    # (22:30 en España en invierno, 23:30 en verano). GitHub puede retrasarlo unos minutos.
+    - cron: '30 21 * * 1-5'
+  workflow_dispatch:
+    inputs:
+      window_hours:
+        description: 'Horas hacia atrás para considerar una señal nueva'
+        default: '26'
+      dry_run:
+        description: 'Sólo mostrar los mensajes, sin enviarlos'
+        type: boolean
+        default: false
+
+permissions:
+  contents: read
+
+concurrency:
+  group: telegram-alerts
+  cancel-in-progress: false
+
+jobs:
+  alerts:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+      - run: npm ci --omit=dev --ignore-scripts --no-audit --no-fund
+      - name: Ejecutar alertas
+        env:
+          TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+          TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
+          WINDOW_HOURS: ${{ github.event.inputs.window_hours || '26' }}
+          DRY_RUN: ${{ github.event.inputs.dry_run == 'true' && '--dry-run' || '' }}
+        run: node scripts/run-alerts.js --window-hours "$WINDOW_HOURS" $DRY_RUN

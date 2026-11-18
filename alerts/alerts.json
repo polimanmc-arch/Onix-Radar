@@ -1,0 +1,17 @@
+{
+  "alerts": [
+    {
+      "id": "sp500-semanal-long",
+      "name": "S&P 500 · rebote semanal",
+      "enabled": true,
+      "universe": "SP500",
+      "direction": "long",
+      "notifyEmpty": false,
+      "filters": [
+        { "ind": "WMA", "params": { "p": 30 }, "tf": "1wk", "op": ">", "cmpType": "prev" },
+        { "ind": "RSI", "params": { "p": 4 }, "tf": "1wk", "op": "<", "cmpType": "val", "cmpVal": 35 },
+        { "ind": "STOCH", "params": { "p": 1, "ks": 1, "dp": 1 }, "tf": "1wk", "op": "<", "cmpType": "val", "cmpVal": 20 }
+      ]
+    }
+  ]
+}

@@ -7,11 +7,12 @@
   const applyWeightBounds = (weights, minAbs, maxAbs) => window.StockScannerCore.boundWeights(weights, minAbs, maxAbs);
 
   // Clave de periodo para cruzar retornos de distintos símbolos por fecha y no por posición.
-  // Se desplaza 12 h para que barras fechadas a medianoche local (Europa/Asia) caigan en su día.
+  // Se desplaza 6 h para que barras fechadas a medianoche europea (22:00-23:00 UTC del día anterior)
+  // caigan en su día sin mover al día siguiente las diarias de EE. UU. (13:30 UTC).
   function periodKey(t, tf){
     if(t==null) return null;
     if(tf==='4h') return String(t);
-    const d=new Date((Number(t)+43200)*1000);
+    const d=new Date((Number(t)+21600)*1000);
     const y=d.getUTCFullYear(), m=d.getUTCMonth()+1, day=d.getUTCDate();
     if(tf==='1mo') return y+'-'+m;
     if(tf==='1wk'){

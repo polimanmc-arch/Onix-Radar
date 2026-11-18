@@ -561,6 +561,83 @@ window.StockScannerTabs = window.StockScannerTabs || {};
     }
     // ── Scanner tab root component ─────────────────────────────────────────────
     // Local state holds the collapse/expand of the config block.
+    // ── Telegram: envío manual y exportación como alerta programada ─────────────
+    function buildAlertFromScanner(ctx) {
+        const presets = window.StockScannerConfig.UNIVERSE_PRESETS || {};
+        const filters = (ctx.scanDirection === 'short' ? ctx.shortFilters : ctx.filters) || [];
+        const clean = filters.map(({ _id, ...f }) => JSON.parse(JSON.stringify(f)));
+        const ids = (ctx.universeIds || []).filter(id => presets[id] && !presets[id].backtestOnly);
+        const fromIds = new Set(ids.flatMap(id => presets[id].tickers || []));
+        const current = new Set(ctx.tickers || []);
+        const sameUniverse = ids.length > 0 && fromIds.size === current.size && [...current].every(t => fromIds.has(t));
+        const label = sameUniverse ? ids.map(id => presets[id].label || id).join(' + ') : 'Lista propia';
+        const slug = (label + '-' + (ctx.scanDirection || 'long')).normalize('NFD').replace(/[̀-ͯ]/g, '').toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '');
+        const alert = { id: slug, name: `${label} · ${ctx.scanDirection === 'short' ? 'short' : 'long'}`, enabled: true,
+            ...(sameUniverse ? { universe: ids.length === 1 ? ids[0] : ids } : { tickers: [...current] }),
+            direction: ctx.scanDirection === 'short' ? 'short' : 'long', notifyEmpty: false, filters: clean };
+        return { alert, label };
+    }
+    function TelegramActions({ ctx }) {
+        const { S, results, passN } = ctx;
+        const [configured, setConfigured] = useState(null);
+        const [status, setStatus] = useState(null);
+        const [sending, setSending] = useState(false);
+        const [showAlert, setShowAlert] = useState(false);
+        useEffect(() => {
+            let alive = true;
+            fetch('/api/telegram/status').then(r => r.json()).then(j => { if (alive)
+                setConfigured(!!(j === null || j === void 0 ? void 0 : j.configured)); }).catch(() => { if (alive)
+                setConfigured(false); });
+            return () => { alive = false; };
+        }, []);
+        const { alert, label } = React.useMemo(() => buildAlertFromScanner(ctx), [ctx.filters, ctx.shortFilters, ctx.scanDirection, ctx.universeIds, ctx.tickers]);
+        const alertJson = JSON.stringify(alert, null, 2);
+        const send = async () => {
+            setSending(true);
+            setStatus(null);
+            const rows = results.filter(r => r.passed && !r.err).map(r => ({ ticker: r.ticker, price: r.price, chg: r.chg }));
+            try {
+                const res = await fetch('/api/telegram/send', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({
+                        title: 'Radar Onix · Scanner',
+                        subtitle: `${new Date().toISOString().slice(0, 10)} · ${rows.length} señales · ${label}`,
+                        direction: alert.direction, filters: alert.filters, rows,
+                    }) });
+                const json = await res.json().catch(() => ({}));
+                setStatus(res.ok && json.ok ? { tone: 'ok', text: 'Enviado a Telegram.' } : { tone: 'warn', text: json.error || ('Error ' + res.status) });
+            }
+            catch (e) {
+                setStatus({ tone: 'warn', text: (e === null || e === void 0 ? void 0 : e.message) || 'No se pudo enviar.' });
+            }
+            finally {
+                setSending(false);
+            }
+        };
+        const copy = async () => {
+            try {
+                await navigator.clipboard.writeText(alertJson);
+                setStatus({ tone: 'ok', text: 'Alerta copiada. Pégala en alerts/alerts.json dentro de "alerts".' });
+            }
+            catch {
+                setShowAlert(true);
+                setStatus({ tone: 'warn', text: 'No se pudo copiar automáticamente: selecciona el texto.' });
+            }
+        };
+        return (React.createElement("div", { className: "telegram-actions", "aria-label": "Telegram", style: { display: 'flex', flexWrap: 'wrap', gap: 8, alignItems: 'center', margin: '0 0 10px' } },
+            React.createElement("button", { type: "button", style: S.ghostBtn, onClick: send, disabled: !configured || !passN || sending, "aria-busy": sending, title: configured === false ? 'Configura TELEGRAM_BOT_TOKEN y TELEGRAM_CHAT_ID en los secretos de Streamlit' : '' }, sending ? 'Enviando…' : `Enviar ${passN} señales a Telegram`),
+            React.createElement("button", { type: "button", style: S.ghostBtn, "aria-expanded": showAlert, onClick: () => setShowAlert(v => !v) }, "Alerta diaria\u2026"),
+            configured === false && React.createElement("span", { style: { fontSize: 10, color: 'var(--text-3)' } }, "Telegram sin configurar en el servidor."),
+            status && React.createElement("span", { role: "status", style: { fontSize: 11, color: status.tone === 'ok' ? 'var(--green)' : 'var(--amber)' } }, status.text),
+            showAlert && React.createElement("div", { style: { ...S.panel, padding: 12, width: '100%' } },
+                React.createElement("div", { style: { fontSize: 11, color: 'var(--text-2)', lineHeight: 1.6, marginBottom: 8 } },
+                    "Para recibir estos filtros cada d\u00EDa laborable tras el cierre (s\u00F3lo se\u00F1ales nuevas), a\u00F1ade este bloque a la lista",
+                    React.createElement("code", null, " \"alerts\" "),
+                    "de ",
+                    React.createElement("code", null, "alerts/alerts.json"),
+                    " y s\u00FAbelo a GitHub. La alerta usa el universo y los filtros actuales del scanner."),
+                React.createElement("textarea", { readOnly: true, "aria-label": "Definici\u00F3n de la alerta", value: alertJson, rows: Math.min(18, alertJson.split('\n').length), onFocus: e => e.target.select(), style: { ...S.inp, width: '100%', fontFamily: 'var(--font-mono)', fontSize: 10, resize: 'vertical' } }),
+                React.createElement("div", { style: { marginTop: 6 } },
+                    React.createElement("button", { type: "button", style: S.ghostBtn, onClick: copy }, "Copiar")))));
+    }
     function ScannerTab({ ctx }) {
         const { S, results, scanning, logLines, passN, buildPortfolio, pfBuilding, shown, errN, dataCacheRef } = ctx;
         const [configOpen, setConfigOpen] = useState(() => {
@@ -615,6 +692,7 @@ window.StockScannerTabs = window.StockScannerTabs || {};
             hasResults && React.createElement("div", { className: "workspace-summary", "aria-label": "Resumen del escaneo" }, [[results.length, 'escaneadas', 'var(--text-1)'], [passN, 'señales', 'var(--green)'], [results.length - passN - errN, 'sin señal', 'var(--text-2)'], [errN, 'errores', 'var(--amber)']].map(([n, label, color]) => React.createElement("span", { key: label },
                 React.createElement("strong", { style: { color } }, n),
                 label))),
+            hasResults && !scanning && React.createElement(TelegramActions, { ctx: ctx }),
             passN >= 2 && React.createElement("div", { className: "portfolio-cta" },
                 React.createElement("div", null,
                     React.createElement("strong", null,

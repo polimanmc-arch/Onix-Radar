@@ -57,3 +57,39 @@ WMA · SMA · EMA · RSI · Estocástico %K · MACD Histograma · ATR · Precio 
 ## Datos
 
 Yahoo Finance · Nasdaq Screener · Composición histórica del S&P 500: [fja05680/sp500](https://github.com/fja05680/sp500) (MIT). Para actualizarla: `node scripts/build-sp500-history.js`.
+
+## Alertas por Telegram
+
+Dos formas de recibir señales del scanner en Telegram:
+
+- **Alertas diarias automáticas** (GitHub Actions, `.github/workflows/telegram-alerts.yml`): de lunes a viernes a las 21:30 UTC, después del cierre de Wall Street, se ejecutan las alertas de `alerts/alerts.json` y se envían solo las **señales nuevas**: valores que cumplen los filtros en una vela cerrada desde la ejecución anterior y no los cumplían en la vela previa. Funciona aunque la app de Streamlit esté dormida.
+- **Botón "Enviar a Telegram"** en el scanner, para mandar los resultados del escaneo actual.
+
+### Configuración (una sola vez)
+
+1. En Telegram, habla con [@BotFather](https://t.me/BotFather), envía `/newbot` y guarda el **token** que te da.
+2. Envía cualquier mensaje a tu bot y abre `https://api.telegram.org/bot<TOKEN>/getUpdates`: el número de `"chat":{"id": ...}` es tu **chat id**. Para un grupo, añade el bot al grupo y repite el paso.
+3. **GitHub** → repositorio → Settings → Secrets and variables → Actions → *New repository secret*: crea `TELEGRAM_BOT_TOKEN` y `TELEGRAM_CHAT_ID`.
+4. **Streamlit Cloud** (solo para el botón) → tu app → Settings → Secrets:
+   ```toml
+   TELEGRAM_BOT_TOKEN = "123456:ABC..."
+   TELEGRAM_CHAT_ID = "123456789"
+   ```
+5. Prueba: GitHub → Actions → *Alertas Telegram* → *Run workflow* (marca *dry run* para ver los mensajes sin enviarlos).
+
+El token solo vive en esos secretos: nunca llega al navegador. El botón de la app tiene un límite de un envío cada 15 segundos y 40 al día.
+
+### Definir alertas
+
+En el scanner, **Alerta diaria…** muestra la definición con el universo y los filtros actuales. Cópiala dentro de la lista `"alerts"` de `alerts/alerts.json` y súbela a GitHub. Campos:
+
+| Campo | Descripción |
+| --- | --- |
+| `id`, `name` | Identificador único y título del mensaje |
+| `universe` | Universo predefinido (`"SP500"`, `"NASDAQ100"`, `"DOW30"`…) o lista de ellos; o bien `tickers` con símbolos |
+| `direction` | `"long"` o `"short"` |
+| `filters` | Filtros del scanner (mismo formato que la app) |
+| `notifyEmpty` | `true` para recibir también un mensaje cuando no haya señales nuevas |
+| `enabled` | `false` para pausar la alerta |
+
+Probar en local: `node scripts/run-alerts.js --dry-run` (añade `--window-hours 240` para ver señales de los últimos días).

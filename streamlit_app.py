@@ -1,4 +1,5 @@
 """Entry point for Streamlit Community Cloud: streamlit run streamlit_app.py."""
+import os
 import streamlit as st
 import streamlit.components.v1 as components
 
@@ -14,6 +15,16 @@ st.markdown('''<style>
   .stElementContainer:has(iframe[title*="onix_radar"]) {margin: 0!important;}
   iframe[title*="onix_radar"] {display: block; border: 0; width: 100%;}
 </style>''', unsafe_allow_html=True)
+
+
+# Secretos de Telegram (App settings → Secrets) para el proceso de Node; nunca llegan al navegador.
+for _key in ('TELEGRAM_BOT_TOKEN', 'TELEGRAM_CHAT_ID'):
+    try:
+        _value = st.secrets.get(_key)
+    except Exception:  # sin archivo de secretos
+        _value = None
+    if _value and not os.environ.get(_key):
+        os.environ[_key] = str(_value)
 
 
 @st.cache_resource(show_spinner='Iniciando Radar Onix…')

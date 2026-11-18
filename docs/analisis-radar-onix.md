@@ -35,6 +35,8 @@ Mejora añadida: composición histórica del S&P 500 (universo "S&P 500 históri
 
 La lista "S&P 500" del scanner (`config/universes.js`) sale ahora de los miembros actuales del mismo archivo: antes tenía 57 tickers que ya no pertenecían al índice y le faltaban 84 miembros. `sp500History.js` debe cargarse antes que `universes.js`.
 
+Mejora añadida: alertas por Telegram (`public/app/core/alerts.js`, `scripts/run-alerts.js`, `.github/workflows/telegram-alerts.yml`, ruta `/api/telegram/*`). GitHub Actions ejecuta las alertas de `alerts/alerts.json` de lunes a viernes a las 21:30 UTC y envía sólo las señales nuevas (vela cerrada dentro de la ventana de 26 h y que no pasaba en la vela anterior, sin guardar estado). En el scanner hay un botón de envío manual (texto generado en el servidor, con límite de frecuencia) y la exportación de los filtros actuales como alerta. Configuración en el README. Corrección asociada: la clave de fecha del portafolio desplazaba al día siguiente las velas diarias de EE. UU. (13:30 UTC + 12 h); ahora usa +6 h.
+
 ## Alcance y comprobaciones
 
 Se revisaron la estructura, las entradas de la aplicación, los flujos de scanner/backtest/portafolio, la configuración de temporalidades, persistencia, servicios y cachés, rutas, compilación, pruebas e identidad visual. No es una certificación financiera ni una auditoría exhaustiva de cada interacción.
