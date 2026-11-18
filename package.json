@@ -1,0 +1,23 @@
+{
+  "name": "onix-radar",
+  "version": "1.1.0",
+  "description": "Radar Onix — Multi-timeframe technical scanner & backtester",
+  "main": "server.js",
+  "scripts": {
+    "start": "node server.js",
+    "test": "npm run build:client && node --test tests/*.test.js",
+    "build:client": "node scripts/precompile-jsx.js"
+  },
+  "engines": {
+    "node": ">=18"
+  },
+  "dependencies": {
+    "express": "^4.21.0"
+  },
+  "devDependencies": {
+    "react": "18.3.1",
+    "react-dom": "18.3.1",
+    "react-test-renderer": "18.3.1",
+    "typescript": "6.0.3"
+  }
+}

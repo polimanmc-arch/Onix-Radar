@@ -1,0 +1,10 @@
+.cache/
+node_modules/
+npm-debug.log*
+__pycache__/
+*.pyc
+.venv/
+.env
+.env.*
+!.env.example
+.streamlit/secrets.toml

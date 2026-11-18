@@ -1,0 +1,29 @@
+const test=require('node:test');
+const assert=require('node:assert/strict');
+const fs=require('node:fs');
+const vm=require('node:vm');
+const source=fs.readFileSync('public/app/streamlitBridge.js','utf8');
+
+test('Streamlit bridge batches fetch, preserves HTTP errors and handles cancellation',async()=>{
+  const messages=[],listeners={},timers=[];
+  const parent={innerHeight:900,postMessage(message){messages.push(message);}};
+  const window={parent,fetch:()=>Promise.resolve('native'),addEventListener(type,fn){listeners[type]=fn;}};
+  const location={pathname:'/component/onix/index.html',search:'',origin:'https://app.streamlit.app',href:'https://app.streamlit.app/component/onix/index.html'};
+  vm.runInNewContext(source,{window,location,URL,URLSearchParams,Response,DOMException,Date,Math,setTimeout(fn){timers.push(fn);return timers.length;}});
+  assert.equal(messages[0].type,'streamlit:componentReady');
+  const first=window.fetch('/api/health');
+  const second=window.fetch('/api/charts',{method:'POST',body:'{"symbols":[]}'});
+  timers.shift()();
+  const batch=messages.find(m=>m.type==='streamlit:setComponentValue').value;
+  assert.equal(batch.requests.length,2);
+  assert.equal(batch.requests[1].method,'POST');
+  assert.equal(batch.requests[1].body,'{"symbols":[]}');
+  listeners.message({source:parent,origin:location.origin,data:{type:'streamlit:render',args:{response:{batch_id:batch.batch_id,results:batch.requests.map((r,i)=>({id:r.id,status:i?400:200,body:i?'{}':'{"ok":true}'}))}}}});
+  assert.deepEqual(await (await first).json(),{ok:true});
+  assert.equal((await second).status,400);
+  assert.equal(await window.fetch('https://other.example/file'),'native');
+  const controller=new AbortController();
+  const cancelled=window.fetch('/api/health',{signal:controller.signal});
+  controller.abort();
+  await assert.rejects(cancelled,{name:'AbortError'});
+});

@@ -1,0 +1,158 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Radar Onix</title>
+<link href="https://fonts.googleapis.com/css2?family=DM+Sans:opsz,wght@9..40,300;9..40,400;9..40,500;9..40,600;9..40,700;9..40,800&family=IBM+Plex+Mono:wght@300;400;500;600&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="/assets/styles.css">
+<link rel="stylesheet" href="/assets/workspace.css?v=3">
+<link rel="icon" href="/assets/favicon.svg" type="image/svg+xml">
+<script src="/app/streamlitBridge.js"></script>
+
+<!-- ═══════════════════════════════════════════════════════════════════════════
+     LAYER 0 — Third-party libraries
+     Must load before any app code.
+     ═══════════════════════════════════════════════════════════════════════════ -->
+<script crossorigin src="https://unpkg.com/react@18/umd/react.production.min.js"></script>
+<script crossorigin src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js"></script>
+<script>
+(function(){
+  var prevOnError = window.onerror;
+  window.onerror = function(message, source, lineno, colno, error){
+    var msg = String(message || '');
+    var src = String(source || '');
+    var stack = String((error && error.stack) || '');
+    if(msg === 'Object is disposed' && (src.indexOf('lightweight-charts') >= 0 || stack.indexOf('lightweight-charts') >= 0 || !src)){
+      return true;
+    }
+    if(typeof prevOnError === 'function'){
+      return prevOnError.apply(this, arguments);
+    }
+    return false;
+  };
+  if(!window.__onixResizeObserverGuard && window.ResizeObserver){
+    window.__onixResizeObserverGuard = true;
+    var NativeResizeObserver = window.ResizeObserver;
+    window.ResizeObserver = class OnixResizeObserver extends NativeResizeObserver {
+      constructor(callback){
+        super(function(entries, observer){
+          try{
+            callback(entries, observer);
+          }catch(error){
+            if(String((error && error.message) || error) === 'Object is disposed') return;
+            throw error;
+          }
+        });
+      }
+    };
+  }
+})();
+</script>
+<script src="https://unpkg.com/lightweight-charts@4.1.0/dist/lightweight-charts.standalone.production.js"></script>
+</head>
+<body>
+<div id="root"></div>
+
+<!-- ═══════════════════════════════════════════════════════════════════════════
+     LAYER 1 — Configuration   →  window.StockScannerConfig.*
+     No dependencies on other app layers.
+     ═══════════════════════════════════════════════════════════════════════════ -->
+<script src="/app/config/universes.js"></script>
+<script src="/app/config/timeframes.js"></script>
+<script src="/app/config/indicators.js"></script>
+
+<!-- ═══════════════════════════════════════════════════════════════════════════
+     LAYER 2 — API helpers     →  window.StockScannerApi.*
+     Depends on: nothing (plain fetch wrappers).
+     ═══════════════════════════════════════════════════════════════════════════ -->
+<script src="/app/api/http.js"></script>
+<script src="/app/api/sectorApi.js"></script>
+<script src="/app/api/quotesApi.js"></script>
+
+<!-- ═══════════════════════════════════════════════════════════════════════════
+     LAYER 3 — Core engine     →  window.StockScannerCore.*
+     ⚠ ORDER MATTERS within this layer:
+       indicators.js   → defines calcWMA / calcEMA / series* functions
+       engine.js       → uses indicator functions + TIMEFRAMES (Layer 1)
+       *Workflow.js    → use engine functions; all depend on engine.js
+     ═══════════════════════════════════════════════════════════════════════════ -->
+<script src="/app/core/indicators.js"></script>
+<script src="/app/core/engine.js"></script>
+<script src="/app/core/scannerWorkflow.js"></script>
+<script src="/app/core/backtestWorkflow.js"></script>
+<script src="/app/core/portfolioWorkflow.js"></script>
+
+<!-- ═══════════════════════════════════════════════════════════════════════════
+     LAYER 4 — State hooks     →  window.StockScannerState.*
+                                  window.StockScannerDomainState.*
+     ⚠ ORDER MATTERS within this layer:
+       defaults.js     → defines newFilter / defaultLongFilters etc.
+       *State.js       → React hooks; each uses defaults + config (Layers 1+3)
+     ═══════════════════════════════════════════════════════════════════════════ -->
+<script src="/app/state/defaults.js"></script>
+<script src="/app/state/scannerState.js"></script>
+<script src="/app/state/portfolioState.js"></script>
+<script src="/app/state/backtestState.js"></script>
+
+<!-- ═══════════════════════════════════════════════════════════════════════════
+     LAYER 5 — Utilities       →  window.StockScannerPortfolioIO.*
+                                  window.StockScannerAppActions.*
+                                  window.StockScannerFormatters.*
+     Depends on: Layers 1–2 (api/http, config).
+     ═══════════════════════════════════════════════════════════════════════════ -->
+<script src="/app/utils/portfolioIO.js"></script>
+<script src="/app/utils/appActions.js"></script>
+<script src="/app/utils/formatters.js"></script>
+
+<!-- ═══════════════════════════════════════════════════════════════════════════
+     LAYER 6 — Controllers     →  window.StockScannerControllers.*
+     Depends on: Layers 1–5.
+     ═══════════════════════════════════════════════════════════════════════════ -->
+<script src="/app/controllers/scannerController.js"></script>
+<script src="/app/controllers/portfolioController.js"></script>
+<script src="/app/controllers/backtestController.js"></script>
+
+<!-- ═══════════════════════════════════════════════════════════════════════════
+     LAYER 7 — UI (no JSX)     →  window.StockScannerUI.* (partial)
+     Plain JS — no Babel transform needed.
+     ⚠ ORDER MATTERS within this layer:
+       appShell.js     → defines UI_STYLES, APP_TABS, TF_COLORS
+       chartRenderer.js→ pure chart rendering helpers; uses StockScannerCore
+                         (must precede chartModal.js)
+     ═══════════════════════════════════════════════════════════════════════════ -->
+<script src="/app/ui/appShell.js"></script>
+<script src="/app/ui/chartRenderer.js"></script>
+
+<!-- ═══════════════════════════════════════════════════════════════════════════
+     LAYER 8 — Startup validator
+     Checks that Layers 1–7 all exposed their expected symbols.
+     Logs a clear error to the console if the load order is broken.
+     ═══════════════════════════════════════════════════════════════════════════ -->
+<script src="/app/startup-check.js"></script>
+
+<!-- ═══════════════════════════════════════════════════════════════════════════
+     LAYER 9 — UI (JSX / Babel) →  window.StockScannerUI.* (React components)
+                                   window.StockScannerTabs.*
+     Babel transforms these at runtime. All run after Layers 1–8.
+     ⚠ ORDER MATTERS within this layer:
+       chartModal.js   → depends on ChartRenderer (Layer 7)
+       appHeader, tabNav, selectedChartLayer → standalone components
+       scannerTab, portfolioTab, backtestTab → depend on appShell styles
+       main.js         → mounts the root; must be last
+     ═══════════════════════════════════════════════════════════════════════════ -->
+<script src="/app/compiled/ui/chartModal.js"></script>
+<script src="/app/compiled/ui/appHeader.js"></script>
+<script src="/app/compiled/ui/tabNav.js"></script>
+<script src="/app/compiled/ui/selectedChartLayer.js"></script>
+<script src="/app/compiled/ui/scannerTab.js"></script>
+<script src="/app/compiled/ui/portfolioTab.js"></script>
+<script src="/app/compiled/ui/backtestTab.js"></script>
+
+<!-- ═══════════════════════════════════════════════════════════════════════════
+     LAYER 10 — App entry point
+     Mounts the React root. Must be the absolute last script.
+     ═══════════════════════════════════════════════════════════════════════════ -->
+<script src="/app/compiled/main.js"></script>
+</body>
+</html>
