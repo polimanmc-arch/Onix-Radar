@@ -208,3 +208,25 @@ test('tearsheet: monthly returns compound to the total, drawdowns start at the i
   assert.equal(dd.drawdowns[0].recovered,true);
   assert.equal(dd.drawdowns[0].weeks,3);
 });
+
+test('ATR follows Wilder smoothing from the oldest bar and reacts to recent volatility',()=>{
+  const core=load([]);
+  const L=120, n=14;
+  const closes=Array.from({length:L},(_,i)=>100+5*Math.sin(i*0.3));
+  const range=i=>i<10?8:1; // las 10 velas más recientes son mucho más volátiles
+  const highs=closes.map((c,i)=>c+range(i)/2), lows=closes.map((c,i)=>c-range(i)/2);
+  // Referencia independiente, de antigua a reciente.
+  const oc=[...closes].reverse(), oh=[...highs].reverse(), ol=[...lows].reverse();
+  const tr=[]; for(let i=1;i<L;i++) tr.push(Math.max(oh[i]-ol[i],Math.abs(oh[i]-oc[i-1]),Math.abs(ol[i]-oc[i-1])));
+  let atr=tr.slice(0,n).reduce((a,b)=>a+b,0)/n; const ref=[atr];
+  for(let i=n;i<tr.length;i++){ atr=(atr*(n-1)+tr[i])/n; ref.push(atr); }
+  const [cur,prev]=core.calcATR(highs,lows,closes,n);
+  assert.ok(Math.abs(cur-ref.at(-1))<1e-9, cur+' vs '+ref.at(-1));
+  assert.ok(Math.abs(prev-ref.at(-2))<1e-9);
+  assert.ok(cur>3,'recent wide candles dominate the current ATR: '+cur);
+  // El evaluador rápido (backtest, señales) usa la misma serie.
+  const ev=core.createRuleEvaluator();
+  const d={ok:true,closes,highs,lows,opens:closes};
+  const s=ev.getSeries(d,'ATR',{p:n});
+  assert.ok(Math.abs(s[0]-cur)<1e-12 && Math.abs(s[5]-core.calcATR(highs.slice(5),lows.slice(5),closes.slice(5),n)[0])<1e-12);
+});

@@ -68,17 +68,9 @@
   const cachedMACD  = (d,p,sl,sg)=>_getCachedSeries(d,'MACD',{p,sl,sg},()=>seriesMACD(d.closes,p,sl,sg));
   const cachedATR = (d,p)=>_getCachedSeries(d,'ATR',{p},()=>{
     if(d.closes.length<p+2)return [];
-    const tr=d.closes.slice(0,-1).map((c,i)=>Math.max(d.highs[i]-d.lows[i],Math.abs(d.highs[i]-d.closes[i+1]),Math.abs(d.lows[i]-d.closes[i+1])));
-    const prefix=[0];
-    tr.forEach(v=>prefix.push(prefix[prefix.length-1]+v));
-    // Weighted suffixes reproduce calcATR at every historical slice in O(N),
-    // preserving its existing smoothing convention without repeated slicing.
-    const tail=Array(tr.length+1).fill(0),q=(p-1)/p;
-    let decay=1;
-    for(let i=tr.length-1;i>=0;i--){tail[i]=tail[i+1]+decay*tr[i]/p;decay*=q;}
-    const values=[];
-    for(let i=0;i<tr.length-p;i++)values.push(((prefix[i+p]-prefix[i])/p)*Math.pow(q,tr.length-i-p)+tail[i+p]);
-    return values.reverse();
+    // Misma serie que calcATR en cada vela (Wilder desde la vela más antigua), de antigua a reciente.
+    const s=window.StockScannerCore.seriesATRNewestFirst(d.highs,d.lows,d.closes,p);
+    return s.slice(0,d.closes.length-1-p).reverse();
   });
 
   // ─── THEME-AWARE CHART COLORS ───────────────────────────────────────────

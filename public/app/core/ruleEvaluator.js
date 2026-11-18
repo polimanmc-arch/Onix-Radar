@@ -140,18 +140,7 @@
           }
           return out;
         }
-        if(ind==='ATR'){
-          const tr=Array(Math.max(0,L-1)).fill(null);
-          for(let i=0;i<L-1;i++) tr[i]=Math.max(d.highs[i]-d.lows[i],Math.abs(d.highs[i]-d.closes[i+1]),Math.abs(d.lows[i]-d.closes[i+1]));
-          for(let i=0;i+p<=tr.length;i++){
-            let atr=0;
-            for(let j=0;j<p;j++) atr+=tr[i+j];
-            atr/=p;
-            for(let j=i+p;j<tr.length;j++) atr=(atr*(p-1)+tr[j])/p;
-            out[i]=atr;
-          }
-          return out;
-        }
+        if(ind==='ATR') return window.StockScannerCore.seriesATRNewestFirst(d.highs,d.lows,d.closes,p);
         return null;
       };
       const getSeries = (d, ind, params={}) => {

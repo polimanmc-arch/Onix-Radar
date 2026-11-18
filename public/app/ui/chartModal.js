@@ -298,21 +298,8 @@
       }
     }
 
-    // ATR 14
-    let atr14 = null;
-    if (closes.length >= 15 && highs.length >= 15 && lows.length >= 15) {
-      const trs = [];
-      for (let i = 0; i < 14; i++) {
-        trs.push(
-          Math.max(
-            highs[i] - lows[i],
-            Math.abs(highs[i] - closes[i + 1]),
-            Math.abs(lows[i] - closes[i + 1]),
-          ),
-        );
-      }
-      atr14 = trs.reduce((a, b) => a + b, 0) / 14;
-    }
+    // ATR 14 (Wilder, misma definición que filtros y gráfico)
+    const atr14 = window.StockScannerCore.calcATR(highs, lows, closes, 14)[0];
 
     // SMA50, SMA200 and distance from price to each
     const sma = (n) => {
