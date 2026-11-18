@@ -9,7 +9,7 @@ const sec=iso=>Date.UTC(+iso.slice(0,4),+iso.slice(5,7)-1,+iso.slice(8,10))/1000
 
 function load(extra=[]){
   const ctx=vm.createContext({window:{},console,setTimeout,clearTimeout,AbortController,Date,Math});
-  for(const f of ['config/timeframes.js','config/universes.js','config/sp500History.js','core/indexMembership.js','core/indicators.js','core/engine.js',...extra])
+  for(const f of ['config/timeframes.js','config/sp500History.js','config/universes.js','core/indexMembership.js','core/indicators.js','core/engine.js',...extra])
     vm.runInContext(fs.readFileSync(path.join(root,'public/app',f),'utf8'),ctx);
   return ctx.window;
 }
@@ -97,4 +97,13 @@ test('series that stop before the others are excluded instead of being shifted i
     setBtRunning:noop,setBtProgress:noop,setTab:noop,setBacktest:x=>{r=x;}});
   assert.equal(r.diagnostics.validTickers,3);
   assert.equal(r.equityCurve.at(-1).holdings,3);
+});
+
+test('scanner S&P 500 list is the current composition from the history file',()=>{
+  const cfg=load().StockScannerConfig;
+  assert.deepEqual([...cfg.SP500],[...cfg.SP500_HISTORY.currentMembers]);
+  assert.equal(cfg.UNIVERSE_PRESETS.SP500.tickers,cfg.SP500);
+  for(const t of ['PLTR','UBER','BRK-B','BNY']) assert.ok(cfg.SP500.includes(t),t);
+  for(const t of ['ANSS','PXD','DFS','BK']) assert.ok(!cfg.SP500.includes(t),t);
+  assert.ok(cfg.US_INDEX_COMPONENTS.includes('PLTR'),'derived universes use the new list');
 });

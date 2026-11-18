@@ -33,6 +33,8 @@ Mejora añadida: optimización walk-forward en Backtest (`public/app/core/walkFo
 
 Mejora añadida: composición histórica del S&P 500 (universo "S&P 500 histórico" del Backtest). Datos de https://github.com/fja05680/sp500 (MIT) generados con `node scripts/build-sp500-history.js` en `public/app/config/sp500History.js`; la lógica está en `public/app/core/indexMembership.js`. En cada semana sólo son elegibles los miembros de esa fecha y se vende al salir del índice. Los renombres (FB → META) se resuelven con la fecha de alta de Wikipedia de los miembros actuales. Datos → Composición histórica muestra la cobertura (miembros con historial en Yahoo / tamaño del índice). Limitación: Yahoo no tiene precios de las empresas que dejaron de cotizar, ni se simulan las que no tienen historial completo de la ventana. El backtest descarta además las series cuya última vela es más de 10 días anterior a la del resto (quedarían desplazadas al alinear por posición). Para actualizar los datos basta con volver a ejecutar el script.
 
+La lista "S&P 500" del scanner (`config/universes.js`) sale ahora de los miembros actuales del mismo archivo: antes tenía 57 tickers que ya no pertenecían al índice y le faltaban 84 miembros. `sp500History.js` debe cargarse antes que `universes.js`.
+
 ## Alcance y comprobaciones
 
 Se revisaron la estructura, las entradas de la aplicación, los flujos de scanner/backtest/portafolio, la configuración de temporalidades, persistencia, servicios y cachés, rutas, compilación, pruebas e identidad visual. No es una certificación financiera ni una auditoría exhaustiva de cada interacción.
