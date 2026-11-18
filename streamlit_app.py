@@ -6,8 +6,13 @@ from streamlit_runtime import NodeRuntime, prepare_frontend
 
 st.set_page_config(page_title='Radar Onix', page_icon='📊', layout='wide', initial_sidebar_state='collapsed')
 st.markdown('''<style>
-  .stMainBlockContainer {padding: .5rem!important; max-width: none!important;}
-  iframe[title*="onix_radar"] {border: 0; width: 100%;}
+  header[data-testid="stHeader"], [data-testid="stToolbar"],
+  [data-testid="stDecoration"], footer, #MainMenu {display: none!important;}
+  .stMainBlockContainer {padding: 0!important; max-width: none!important;}
+  [data-testid="stMain"] {padding: 0!important;}
+  .stMainBlockContainer > div {gap: 0!important;}
+  .stElementContainer:has(iframe[title*="onix_radar"]) {margin: 0!important;}
+  iframe[title*="onix_radar"] {display: block; border: 0; width: 100%;}
 </style>''', unsafe_allow_html=True)
 
 

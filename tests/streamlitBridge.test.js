@@ -27,3 +27,22 @@ test('Streamlit bridge batches fetch, preserves HTTP errors and handles cancella
   controller.abort();
   await assert.rejects(cancelled,{name:'AbortError'});
 });
+
+test('component height follows results, shrinks after navigation, and follows the screen',()=>{
+  const messages=[],properties={},parentListeners={};
+  let contentHeight=1400,observerCallback;
+  const root={get scrollHeight(){return contentHeight;},getBoundingClientRect(){return {height:contentHeight};}};
+  const document={readyState:'complete',documentElement:{style:{setProperty(name,value){properties[name]=value;}}},
+    getElementById(){return root;},createElement(){return {};},head:{appendChild(){}}};
+  const parent={innerHeight:900,postMessage(message){messages.push(message);},addEventListener(type,fn){parentListeners[type]=fn;}};
+  const window={parent,document,fetch(){},addEventListener(){},ResizeObserver:class{constructor(fn){observerCallback=fn;}observe(target){assert.equal(target,root);}}};
+  const location={pathname:'/component/onix/index.html',search:'',origin:'https://app.streamlit.app',href:'https://app.streamlit.app/component/onix/index.html'};
+  vm.runInNewContext(source,{window,location,URL,URLSearchParams,Response,DOMException,Date,Math,setTimeout});
+  const heights=()=>messages.filter(m=>m.type==='streamlit:setFrameHeight').map(m=>m.height);
+  assert.deepEqual(heights(),[1400]);
+  contentHeight=2100;observerCallback();
+  contentHeight=400;observerCallback();
+  parent.innerHeight=750;parentListeners.resize();
+  assert.deepEqual(heights(),[1400,2100,900,750]);
+  assert.equal(properties['--embed-viewport-height'],'750px');
+});

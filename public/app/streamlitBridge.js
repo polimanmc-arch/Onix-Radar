@@ -9,11 +9,37 @@
   let queue=[],inFlight=null,timer=null,sequence=0,lastHeight=0;
   const session=Date.now().toString(36)+'-'+Math.random().toString(36).slice(2);
   const send=(type,extra={})=>window.parent.postMessage({isStreamlitMessage:true,type,...extra},parentOrigin);
+  // Component iframes do not scroll. Publish the document's actual height so
+  // Streamlit's outer page can scroll through every panel, including new results.
+  // Keep vh-based layout tied to the screen, rather than the growing iframe.
+  const document=window.document;
+  function viewportHeight(){
+    try{return window.parent.innerHeight||window.innerHeight||800;}
+    catch{return window.innerHeight||800;}
+  }
   const resize=()=>{
-    let height=800;
-    try{height=Math.max(550,window.parent.innerHeight-90);}catch{}
+    const viewport=viewportHeight();
+    document?.documentElement.style.setProperty('--embed-viewport-height',viewport+'px');
+    const root=document?.getElementById('root');
+    const height=Math.ceil(Math.max(viewport,root?.scrollHeight||0,root?.getBoundingClientRect().height||0));
     if(height!==lastHeight){lastHeight=height;send('streamlit:setFrameHeight',{height});}
   };
+  if(document){
+    const style=document.createElement('style');
+    style.textContent=`html,body,#root{min-height:0!important;margin:0!important}
+      .app-root.workspace-shell{min-height:var(--embed-viewport-height)!important}
+      .workspace-rail{height:var(--embed-viewport-height)!important}
+      @media(max-width:600px){.workspace-rail{height:auto!important}}`;
+    document.head.appendChild(style);
+    const observe=()=>{
+      const root=document.getElementById('root');
+      if(root && window.ResizeObserver)new window.ResizeObserver(resize).observe(root);
+      resize();
+    };
+    if(document.readyState==='loading')document.addEventListener('DOMContentLoaded',observe,{once:true});
+    else observe();
+    try{window.parent.addEventListener('resize',resize);}catch{}
+  }
   function schedule(){if(!timer)timer=setTimeout(()=>{timer=null;flush();},25);}
   function flush(){
     if(inFlight)return;
