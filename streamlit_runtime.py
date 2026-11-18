@@ -4,6 +4,7 @@ from __future__ import annotations
 import atexit
 from concurrent.futures import ThreadPoolExecutor
 import json
+import hashlib
 import os
 from pathlib import Path
 import re
@@ -26,6 +27,8 @@ def prepare_frontend() -> Path:
     index = destination / 'index.html'
     html = index.read_text(encoding='utf-8')
     html = html.replace('src="/', 'src="./').replace('href="/', 'href="./')
+    version = hashlib.sha256((destination / 'app/streamlitBridge.js').read_bytes()).hexdigest()[:12]
+    html = html.replace('src="./app/streamlitBridge.js"', f'src="./app/streamlitBridge.js?v={version}"')
     index.write_text(html, encoding='utf-8')
     for file in (destination / 'app').rglob('*.js'):
         source = file.read_text(encoding='utf-8')

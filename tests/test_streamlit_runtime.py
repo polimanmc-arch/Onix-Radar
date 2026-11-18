@@ -29,7 +29,7 @@ class StreamlitRuntimeTests(unittest.TestCase):
     def test_component_assets(self):
         directory = prepare_frontend()
         html = (directory / 'index.html').read_text(encoding='utf-8')
-        self.assertIn('src="./app/streamlitBridge.js"', html)
+        self.assertIn('src="./app/streamlitBridge.js?v=', html)
         self.assertNotIn('src="/', html)
         self.assertNotIn('href="/', html)
         self.assertTrue((directory / 'app' / 'compiled').is_dir())

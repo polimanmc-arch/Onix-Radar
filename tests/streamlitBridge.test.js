@@ -28,21 +28,21 @@ test('Streamlit bridge batches fetch, preserves HTTP errors and handles cancella
   await assert.rejects(cancelled,{name:'AbortError'});
 });
 
-test('component height follows results, shrinks after navigation, and follows the screen',()=>{
+test('embedded app owns scrolling and its frame follows the screen',()=>{
   const messages=[],properties={},parentListeners={};
-  let contentHeight=1400,observerCallback;
+  let contentHeight=1400,embeddedStyle;
   const root={get scrollHeight(){return contentHeight;},getBoundingClientRect(){return {height:contentHeight};}};
   const document={readyState:'complete',documentElement:{style:{setProperty(name,value){properties[name]=value;}}},
-    getElementById(){return root;},createElement(){return {};},head:{appendChild(){}}};
+    getElementById(){return root;},createElement(){return {};},head:{appendChild(style){embeddedStyle=style.textContent;}}};
   const parent={innerHeight:900,postMessage(message){messages.push(message);},addEventListener(type,fn){parentListeners[type]=fn;}};
-  const window={parent,document,fetch(){},addEventListener(){},ResizeObserver:class{constructor(fn){observerCallback=fn;}observe(target){assert.equal(target,root);}}};
+  const window={parent,document,fetch(){},addEventListener(){}};
   const location={pathname:'/component/onix/index.html',search:'',origin:'https://app.streamlit.app',href:'https://app.streamlit.app/component/onix/index.html'};
   vm.runInNewContext(source,{window,location,URL,URLSearchParams,Response,DOMException,Date,Math,setTimeout});
   const heights=()=>messages.filter(m=>m.type==='streamlit:setFrameHeight').map(m=>m.height);
-  assert.deepEqual(heights(),[1400]);
-  contentHeight=2100;observerCallback();
-  contentHeight=400;observerCallback();
+  assert.deepEqual(heights(),[900]);
+  assert.match(embeddedStyle,/#root\{[^}]*overflow-y:auto!important/);
+  assert.match(embeddedStyle,/\.inspector-panel\{position:static!important\}/);
   parent.innerHeight=750;parentListeners.resize();
-  assert.deepEqual(heights(),[1400,2100,900,750]);
+  assert.deepEqual(heights(),[900,750]);
   assert.equal(properties['--embed-viewport-height'],'750px');
 });

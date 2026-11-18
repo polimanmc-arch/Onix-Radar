@@ -1,8 +1,9 @@
 """Entry point for Streamlit Community Cloud: streamlit run streamlit_app.py."""
 import streamlit as st
 import streamlit.components.v1 as components
+import hashlib
 
-from streamlit_runtime import NodeRuntime, prepare_frontend
+from streamlit_runtime import ROOT, NodeRuntime, prepare_frontend
 
 st.set_page_config(page_title='Radar Onix', page_icon='📊', layout='wide', initial_sidebar_state='collapsed')
 st.markdown('''<style>
@@ -17,15 +18,16 @@ st.markdown('''<style>
 
 
 @st.cache_resource(show_spinner='Iniciando Radar Onix…')
-def resources():
+def resources(frontend_version):
     return NodeRuntime(), prepare_frontend()
 
 
 try:
-    runtime, frontend = resources()
+    frontend_version = hashlib.sha256((ROOT / 'public/app/streamlitBridge.js').read_bytes()).hexdigest()
+    runtime, frontend = resources(frontend_version)
     if runtime.process.poll() is not None:
         resources.clear()
-        runtime, frontend = resources()
+        runtime, frontend = resources(frontend_version)
 except Exception as error:
     st.error(f'No se pudo iniciar Radar Onix: {error}')
     st.stop()

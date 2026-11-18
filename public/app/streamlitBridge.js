@@ -9,9 +9,8 @@
   let queue=[],inFlight=null,timer=null,sequence=0,lastHeight=0;
   const session=Date.now().toString(36)+'-'+Math.random().toString(36).slice(2);
   const send=(type,extra={})=>window.parent.postMessage({isStreamlitMessage:true,type,...extra},parentOrigin);
-  // Component iframes do not scroll. Publish the document's actual height so
-  // Streamlit's outer page can scroll through every panel, including new results.
-  // Keep vh-based layout tied to the screen, rather than the growing iframe.
+  // Streamlit disables scrolling on its iframe. Give #root its own scroll area
+  // so long panels stay reachable regardless of the host's overflow settings.
   const document=window.document;
   function viewportHeight(){
     try{return window.parent.innerHeight||window.innerHeight||800;}
@@ -20,20 +19,21 @@
   const resize=()=>{
     const viewport=viewportHeight();
     document?.documentElement.style.setProperty('--embed-viewport-height',viewport+'px');
-    const root=document?.getElementById('root');
-    const height=Math.ceil(Math.max(viewport,root?.scrollHeight||0,root?.getBoundingClientRect().height||0));
+    const height=Math.ceil(viewport);
     if(height!==lastHeight){lastHeight=height;send('streamlit:setFrameHeight',{height});}
   };
   if(document){
     const style=document.createElement('style');
-    style.textContent=`html,body,#root{min-height:0!important;margin:0!important}
+    style.textContent=`html,body{height:100%!important;min-height:0!important;margin:0!important;overflow:hidden!important}
+      #root{height:var(--embed-viewport-height)!important;min-height:0!important;margin:0!important;overflow-y:auto!important;overflow-x:hidden!important;overscroll-behavior-y:contain;scrollbar-gutter:stable}
       .app-root.workspace-shell{min-height:var(--embed-viewport-height)!important}
+      .workspace-main{padding-bottom:96px!important}
+      .inspector-panel{position:static!important}
+      .inspector-chart{height:clamp(240px,36vh,360px)!important;min-height:0!important}
       .workspace-rail{height:var(--embed-viewport-height)!important}
       @media(max-width:600px){.workspace-rail{height:auto!important}}`;
     document.head.appendChild(style);
     const observe=()=>{
-      const root=document.getElementById('root');
-      if(root && window.ResizeObserver)new window.ResizeObserver(resize).observe(root);
       resize();
     };
     if(document.readyState==='loading')document.addEventListener('DOMContentLoaded',observe,{once:true});
