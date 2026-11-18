@@ -311,3 +311,33 @@ test('scanner computes historical signal performance on demand from the scanned 
   assert.ok(json.includes('13 semanas'));
   await Renderer.act(async()=>tree.unmount());
 });
+
+test('walk-forward panel runs from the current backtest rules and applies the last fold parameters',async()=>{
+  const {tree,window}=await mountApp();
+  const app=tree.root.find(n=>n.type?.name==='ScannerTab').props.ctx;
+  const now=1800000000;
+  ['A','B','C','D'].forEach((t,k)=>{
+    const closes=Array.from({length:240},(_,i)=>100+15*Math.sin((i+k*3)*0.35)+0.05*(240-i));
+    app.dataCacheRef.current[t]={'1wk':{ticker:t,ok:true,closes,opens:closes.map(c=>c*1.001),highs:closes.map(c=>c*1.02),lows:closes.map(c=>c*0.98),volumes:closes.map(()=>1e6),times:closes.map((_,i)=>now-i*7*86400)}};
+  });
+  await Renderer.act(async()=>{ window.backtestState.setBtUniverseSource('scan'); window.backtestState.setBtWeeks(150); });
+  await Renderer.act(async()=>tree.root.findByProps({'aria-label':'Backtest'}).props.onClick());
+  const panel=()=>tree.root.findByProps({'aria-label':'Optimización walk-forward'});
+  await Renderer.act(async()=>panel().findByProps({'aria-expanded':false}).props.onClick());
+  const select=panel().findByProps({'aria-label':'Parámetro 1'});
+  assert.ok(select.findAllByType('option').length>=3,'numeric rule values are offered as parameters');
+  const runButton=()=>panel().find(n=>n.type==='button'&&n.children.join('')==='Ejecutar walk-forward');
+  assert.equal(runButton().props.disabled,false);
+  await Renderer.act(async()=>{ await runButton().props.onClick(); });
+  assert.equal(panel().findAllByProps({'aria-label':'Tramos walk-forward'}).length,1);
+  assert.equal(panel().findAllByProps({'aria-label':'Rejilla de parámetros'}).length,1);
+  const paramId=select.props.value;
+  const apply=panel().find(n=>n.type==='button'&&String(n.children.join('')).startsWith('Aplicar los del último tramo'));
+  const label=apply.children.join('');
+  const chosen=Number(label.match(/\(([-\d.]+)\)/)[1]);
+  await Renderer.act(async()=>apply.props.onClick());
+  const [key,gi,ci,field]=paramId.split('.');
+  const cond=window.backtestState[key][Number(gi)].conditions[Number(ci)];
+  assert.equal(field==='p'?cond.params.p:field==='cmpVal'?cond.cmpVal:cond.cmpParams.p,chosen);
+  await Renderer.act(async()=>tree.unmount());
+});

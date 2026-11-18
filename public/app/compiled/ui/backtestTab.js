@@ -1570,6 +1570,278 @@ window.StockScannerTabs = window.StockScannerTabs || {};
             return null;
         return React.createElement(TickerIssuesPanel, { backtest: backtest, S: ctx.S });
     }
+    // ── Optimización walk-forward ──────────────────────────────────────────────
+    // Busca parámetros dentro de muestra y los valida en la ventana siguiente fuera de muestra.
+    const WF_OBJECTIVES = [['sharpe', 'Sharpe'], ['annReturn', 'Retorno anual'], ['calmar', 'Calmar'], ['sortino', 'Sortino']];
+    const WF_RULE_SETTERS = { entryRules: 'setEntryRules', exitRules: 'setExitRules', shortEntryRules: 'setShortEntryRules', shortExitRules: 'setShortExitRules', mktFilterRules: 'setMktFilterRules' };
+    function wfEstimateUniverse(ctx) {
+        var _a, _b, _c, _d, _e, _f, _g;
+        const src = ctx.btUniverseSource || 'scan';
+        let n = 0;
+        if (src === 'custom')
+            n = (ctx.btCustomTickers || '').split(/[\s,;]+/).filter(Boolean).length;
+        else if (src === 'scan')
+            n = Object.keys(((_a = ctx.dataCacheRef) === null || _a === void 0 ? void 0 : _a.current) || {}).filter(t => !t.startsWith('__')).length;
+        else
+            n = ((_e = (_d = (_c = (_b = window.StockScannerConfig) === null || _b === void 0 ? void 0 : _b.UNIVERSE_PRESETS) === null || _c === void 0 ? void 0 : _c[src]) === null || _d === void 0 ? void 0 : _d.tickers) === null || _e === void 0 ? void 0 : _e.length) || ((_g = (_f = (ctx.savedUniverseLists || []).find(l => 'LIST_' + l.id === src)) === null || _f === void 0 ? void 0 : _f.tickers) === null || _g === void 0 ? void 0 : _g.length) || 0;
+        const limit = Math.round(Number(ctx.btUniverseLimit) || 0);
+        return limit > 0 ? Math.min(n, limit) : n;
+    }
+    function WfHeatmap({ result, S }) {
+        const { grid, params, bestFull } = result;
+        const fmt = v => Number.isFinite(v) ? v.toFixed(2) : '—';
+        const scores = grid.map(g => g.score).filter(Number.isFinite);
+        const lo = Math.min(...scores, 0), hi = Math.max(...scores, 0);
+        const cellStyle = v => {
+            if (!Number.isFinite(v))
+                return { color: 'var(--text-3)' };
+            const t = v >= 0 ? (hi > 0 ? v / hi : 0) : (lo < 0 ? v / lo : 0);
+            const pct = Math.round(10 + Math.min(1, Math.abs(t)) * 60);
+            return { background: `color-mix(in srgb, ${v >= 0 ? 'var(--green)' : 'var(--red)'} ${pct}%, transparent)`, color: 'var(--text-0)' };
+        };
+        const isCurrent = vals => vals.every((v, i) => v === params[i].current);
+        const isBest = vals => bestFull && vals.every((v, i) => v === bestFull.values[i]);
+        const td = { fontSize: 11, padding: '6px 8px', textAlign: 'center', fontVariantNumeric: 'tabular-nums', borderRadius: 3 };
+        const mark = vals => ({ outline: isBest(vals) ? '2px solid var(--accent)' : isCurrent(vals) ? '1px dashed var(--text-2)' : 'none', outlineOffset: -2 });
+        if (params.length === 1) {
+            return React.createElement("table", { "aria-label": "Rejilla de par\u00E1metros", style: { borderCollapse: 'separate', borderSpacing: 2 } },
+                React.createElement("thead", null,
+                    React.createElement("tr", null,
+                        React.createElement("th", { style: { ...td, textAlign: 'left', color: 'var(--text-3)' } }, params[0].label),
+                        grid.map((g, i) => React.createElement("th", { key: i, style: { ...td, color: 'var(--text-2)' } }, g.values[0])))),
+                React.createElement("tbody", null,
+                    React.createElement("tr", null,
+                        React.createElement("td", { style: { ...td, textAlign: 'left', color: 'var(--text-3)' } }, result.objectiveLabel),
+                        grid.map((g, i) => React.createElement("td", { key: i, style: { ...td, ...cellStyle(g.score), ...mark(g.values) }, title: `Retorno anual ${(g.annReturn * 100).toFixed(1)}% · ${g.trades} operaciones` }, fmt(g.score))))));
+        }
+        const xs = [...new Set(grid.map(g => g.values[0]))], ys = [...new Set(grid.map(g => g.values[1]))];
+        const at = (x, y) => grid.find(g => g.values[0] === x && g.values[1] === y);
+        return React.createElement("table", { "aria-label": "Rejilla de par\u00E1metros", style: { borderCollapse: 'separate', borderSpacing: 2 } },
+            React.createElement("thead", null,
+                React.createElement("tr", null,
+                    React.createElement("th", { style: { ...td, color: 'var(--text-3)', textAlign: 'left' } },
+                        params[1].label,
+                        " \u2193 / ",
+                        params[0].label,
+                        " \u2192"),
+                    xs.map(x => React.createElement("th", { key: x, style: { ...td, color: 'var(--text-2)' } }, x)))),
+            React.createElement("tbody", null, ys.map(y => React.createElement("tr", { key: y },
+                React.createElement("th", { style: { ...td, color: 'var(--text-2)', textAlign: 'right' } }, y),
+                xs.map(x => { const g = at(x, y); return React.createElement("td", { key: x, style: { ...td, ...cellStyle(g === null || g === void 0 ? void 0 : g.score), ...(g ? mark(g.values) : {}) }, title: g ? `Retorno anual ${(g.annReturn * 100).toFixed(1)}% · ${g.trades} operaciones` : '' }, fmt(g === null || g === void 0 ? void 0 : g.score)); })))));
+    }
+    function WfCurve({ result }) {
+        const a = result.wf.curve, b = result.baseline.curve;
+        if (a.length < 2)
+            return null;
+        const all = [...a, ...b].map(p => p.value);
+        const lo = Math.min(...all), hi = Math.max(...all), rg = (hi - lo) || 1, W = 100, H = 40;
+        const pts = c => c.map((p, i) => (i / (c.length - 1) * W).toFixed(2) + ',' + (H - ((p.value - lo) / rg) * H).toFixed(2)).join(' ');
+        return React.createElement("svg", { role: "img", "aria-label": "Curva fuera de muestra encadenada", viewBox: `0 0 ${W} ${H}`, preserveAspectRatio: "none", style: { width: '100%', height: 160 } },
+            b.length > 1 && React.createElement("polyline", { points: pts(b), fill: "none", stroke: "var(--text-3)", strokeWidth: "1.2", strokeDasharray: "3 2", vectorEffect: "non-scaling-stroke" }),
+            React.createElement("polyline", { points: pts(a), fill: "none", stroke: "var(--accent)", strokeWidth: "1.8", vectorEffect: "non-scaling-stroke" }));
+    }
+    function WalkForwardPanel({ ctx }) {
+        var _a, _b, _c;
+        const core = window.StockScannerCore;
+        const { S, btRunning, btWeeks } = ctx;
+        const [open, setOpen] = React.useState(false);
+        const [sel, setSel] = React.useState(['', '']);
+        const [ranges, setRanges] = React.useState([null, null]);
+        const [isWeeks, setIsWeeks] = React.useState(52);
+        const [oosWeeks, setOosWeeks] = React.useState(13);
+        const [anchored, setAnchored] = React.useState(false);
+        const [objective, setObjective] = React.useState('sharpe');
+        const [minTrades, setMinTrades] = React.useState(5);
+        const [running, setRunning] = React.useState(false);
+        const [progress, setProgress] = React.useState(null);
+        const [result, setResult] = React.useState(null);
+        const [error, setError] = React.useState(null);
+        const abortRef = React.useRef(null);
+        React.useEffect(() => () => { var _a; return (_a = abortRef.current) === null || _a === void 0 ? void 0 : _a.abort(); }, []);
+        const available = React.useMemo(() => open ? core.listOptimizableParams(ctx.getBacktestBaseOptions()) : [], [open, ctx.entryRules, ctx.exitRules, ctx.shortEntryRules, ctx.shortExitRules, ctx.btDirection, ctx.stopATR, ctx.stopATRMult, ctx.stopPct, ctx.stopPctVal, ctx.mktFilterEnabled, ctx.mktFilterRules]);
+        // Selección por defecto: el primer parámetro disponible.
+        React.useEffect(() => {
+            if (!open)
+                return;
+            setSel(prev => {
+                const ids = available.map(p => p.id);
+                const a = ids.includes(prev[0]) ? prev[0] : (ids[0] || '');
+                const b = ids.includes(prev[1]) && prev[1] !== a ? prev[1] : '';
+                return a === prev[0] && b === prev[1] ? prev : [a, b];
+            });
+        }, [open, available]);
+        const chosen = sel.map(id => available.find(p => p.id === id)).filter(Boolean);
+        React.useEffect(() => { setRanges(sel.map(id => { const p = available.find(x => x.id === id); return p ? core.suggestRange(p) : null; })); }, [sel[0], sel[1], available]);
+        const activeRanges = sel.map((id, i) => available.find(p => p.id === id) ? ranges[i] : null).filter(Boolean);
+        const combos = chosen.length && activeRanges.length === chosen.length ? core.buildWalkForwardGrid(chosen, activeRanges).length : 0;
+        const folds = core.buildWalkForwardFolds({ totalWeeks: Number(btWeeks) || 0, isWeeks: Number(isWeeks) || 0, oosWeeks: Number(oosWeeks) || 0, anchored });
+        const runs = combos + folds.length * combos + folds.length * 2;
+        const universe = wfEstimateUniverse(ctx);
+        const { MAX_COMBOS } = core.WALK_FORWARD_LIMITS;
+        const blocker = !chosen.length ? 'Añade reglas con valores numéricos para poder optimizar.'
+            : combos === 0 ? 'El rango no produce valores.'
+                : combos > MAX_COMBOS ? `${combos} combinaciones: el máximo es ${MAX_COMBOS}.`
+                    : !folds.length ? `El periodo (${btWeeks} semanas) no admite ${isWeeks} IS + ${oosWeeks} OOS.`
+                        : universe > 900 ? 'Para el walk-forward limita el universo a 900 símbolos como máximo (Límite universo).'
+                            : null;
+        const run = async () => {
+            const ac = new AbortController();
+            abortRef.current = ac;
+            setRunning(true);
+            setError(null);
+            setResult(null);
+            setProgress(null);
+            try {
+                const out = await core.runWalkForward({ base: ctx.getBacktestBaseOptions(), params: chosen, ranges: activeRanges,
+                    isWeeks: Number(isWeeks), oosWeeks: Number(oosWeeks), anchored, objective, minTrades: Number(minTrades) || 0,
+                    abortSignal: ac.signal, onProgress: setProgress });
+                if (out.ok)
+                    setResult(out);
+                else
+                    setError(out.message || 'No se pudo completar.');
+            }
+            catch (e) {
+                setError((e === null || e === void 0 ? void 0 : e.message) || 'Error');
+            }
+            finally {
+                setRunning(false);
+                abortRef.current = null;
+            }
+        };
+        const applyLast = () => {
+            var _a;
+            const last = (_a = result === null || result === void 0 ? void 0 : result.folds) === null || _a === void 0 ? void 0 : _a[result.folds.length - 1];
+            if (!last)
+                return;
+            const params = result.params.map(p => available.find(x => x.id === p.id)).filter(Boolean);
+            if (params.length !== result.params.length) {
+                setError('Las reglas cambiaron desde el cálculo: vuelve a ejecutarlo.');
+                return;
+            }
+            const next = core.applyWalkForwardParams(ctx.getBacktestBaseOptions(), params, last.values);
+            params.forEach(p => {
+                var _a;
+                if (p.global) {
+                    const setter = p.global === 'stopATRMult' ? ctx.setStopATRMult : ctx.setStopPctVal;
+                    setter === null || setter === void 0 ? void 0 : setter(next[p.global]);
+                }
+                else
+                    (_a = ctx[WF_RULE_SETTERS[p.key]]) === null || _a === void 0 ? void 0 : _a.call(ctx, next[p.key]);
+            });
+        };
+        const pct = v => Number.isFinite(v) ? `${v >= 0 ? '+' : ''}${(v * 100).toFixed(1)}%` : '—';
+        const num = v => Number.isFinite(v) ? v.toFixed(2) : '—';
+        const fmtDate = t => t ? new Date(t * 1000).toISOString().slice(0, 10) : '—';
+        const inp = { ...S.inp, width: 70, textAlign: 'center' };
+        const lbl = { fontSize: 10, color: 'var(--text-2)', marginBottom: 5 };
+        const setRange = (i, field, val) => setRanges(r => r.map((x, j) => j === i && x ? { ...x, [field]: val } : x));
+        const th = { fontSize: 10, color: 'var(--text-3)', fontWeight: 600, padding: '6px 8px', textAlign: 'right', borderBottom: '1px solid var(--row-divider)', whiteSpace: 'nowrap' };
+        const td = { fontSize: 11, padding: '6px 8px', textAlign: 'right', fontVariantNumeric: 'tabular-nums', borderBottom: '1px solid var(--row-divider)', whiteSpace: 'nowrap' };
+        return (React.createElement("section", { className: "walk-forward", "aria-label": "Optimizaci\u00F3n walk-forward", style: { ...S.panel, marginBottom: 10 } },
+            React.createElement("button", { type: "button", onClick: () => setOpen(v => !v), "aria-expanded": open, style: { display: 'flex', justifyContent: 'space-between', alignItems: 'center', width: '100%', padding: '12px 14px', background: 'none', border: 'none', cursor: 'pointer', textAlign: 'left', color: 'var(--text-1)' } },
+                React.createElement("span", null,
+                    React.createElement("strong", { style: { fontSize: 13 } }, "Optimizaci\u00F3n walk-forward"),
+                    React.createElement("span", { style: { display: 'block', fontSize: 11, color: 'var(--text-2)', marginTop: 2 } }, "Elige par\u00E1metros en una ventana y compru\u00E9balos en la siguiente, sin mirar el futuro.")),
+                React.createElement("span", { style: { fontSize: 10, color: 'var(--text-2)' } }, open ? 'Ocultar' : 'Mostrar')),
+            open && React.createElement("div", { style: { padding: '0 14px 14px' } },
+                React.createElement("div", { style: { display: 'grid', gap: 10 } },
+                    [0, 1].map(i => (React.createElement("div", { key: i, style: { display: 'flex', gap: 10, flexWrap: 'wrap', alignItems: 'flex-end' } },
+                        React.createElement("div", { style: { flex: '1 1 260px', minWidth: 0 } },
+                            React.createElement("div", { style: lbl }, i === 0 ? 'Parámetro 1' : 'Parámetro 2 (opcional)'),
+                            React.createElement("select", { "aria-label": i === 0 ? 'Parámetro 1' : 'Parámetro 2', value: sel[i], onChange: e => setSel(s => s.map((x, j) => j === i ? e.target.value : x)), style: { ...S.inp, width: '100%' } },
+                                i === 1 && React.createElement("option", { value: "" }, "\u2014 Ninguno \u2014"),
+                                available.filter(p => i === 0 || p.id !== sel[0]).map(p => React.createElement("option", { key: p.id, value: p.id }, `${p.label} (actual ${p.current})`)))),
+                        ranges[i] && sel[i] && ['from', 'to', 'step'].map(field => (React.createElement("div", { key: field },
+                            React.createElement("div", { style: lbl }, ({ from: 'Desde', to: 'Hasta', step: 'Paso' })[field]),
+                            React.createElement("input", { type: "number", "aria-label": `${({ from: 'Desde', to: 'Hasta', step: 'Paso' })[field]} parámetro ${i + 1}`, value: ranges[i][field], step: "any", onChange: e => setRange(i, field, e.target.value), style: inp }))))))),
+                    React.createElement("div", { style: { display: 'flex', gap: 10, flexWrap: 'wrap', alignItems: 'flex-end' } },
+                        React.createElement("div", null,
+                            React.createElement("div", { style: lbl }, "Ventana IS (semanas)"),
+                            React.createElement("input", { type: "number", "aria-label": "Ventana IS en semanas", min: 8, value: isWeeks, onChange: e => setIsWeeks(e.target.value), style: inp })),
+                        React.createElement("div", null,
+                            React.createElement("div", { style: lbl }, "Ventana OOS (semanas)"),
+                            React.createElement("input", { type: "number", "aria-label": "Ventana OOS en semanas", min: 4, value: oosWeeks, onChange: e => setOosWeeks(e.target.value), style: inp })),
+                        React.createElement("div", null,
+                            React.createElement("div", { style: lbl }, "Objetivo"),
+                            React.createElement("select", { "aria-label": "Objetivo", value: objective, onChange: e => setObjective(e.target.value), style: { ...S.inp, width: 130 } }, WF_OBJECTIVES.map(([k, l]) => React.createElement("option", { key: k, value: k }, l)))),
+                        React.createElement("div", null,
+                            React.createElement("div", { style: lbl }, "M\u00EDn. operaciones IS"),
+                            React.createElement("input", { type: "number", "aria-label": "M\u00EDnimo de operaciones dentro de muestra", min: 0, value: minTrades, onChange: e => setMinTrades(e.target.value), style: inp })),
+                        React.createElement("label", { style: { display: 'flex', gap: 6, alignItems: 'center', fontSize: 11, color: 'var(--text-2)', paddingBottom: 6 } },
+                            React.createElement("input", { type: "checkbox", checked: anchored, onChange: e => setAnchored(e.target.checked) }),
+                            "IS anclada al inicio")),
+                    React.createElement("div", { style: { display: 'flex', gap: 10, alignItems: 'center', flexWrap: 'wrap' } },
+                        !running && React.createElement("button", { type: "button", style: S.btnG(true), onClick: run, disabled: !!blocker || btRunning }, "Ejecutar walk-forward"),
+                        running && React.createElement("button", { type: "button", style: S.ghostBtn, onClick: () => { var _a; return (_a = abortRef.current) === null || _a === void 0 ? void 0 : _a.abort(); } }, "Cancelar"),
+                        React.createElement("span", { role: "status", style: { fontSize: 11, color: blocker ? 'var(--amber)' : 'var(--text-2)' } }, running && progress ? `${progress.phase} · ${progress.done}/${progress.total} ejecuciones`
+                            : blocker || `${combos} combinaciones × ${folds.length} tramos → ${runs} ejecuciones del backtest`)),
+                    error && React.createElement("div", { role: "alert", style: { fontSize: 11, color: 'var(--amber)' } }, error)),
+                result && React.createElement("div", { style: { marginTop: 14 } },
+                    React.createElement("div", { className: "ro-stack-mobile", style: { display: 'grid', gridTemplateColumns: 'repeat(3,1fr)', gap: 10, marginBottom: 12 } },
+                        React.createElement("div", { style: { ...S.cd, padding: 12 } },
+                            React.createElement("div", { style: { fontSize: 10, color: 'var(--text-3)', fontWeight: 600, textTransform: 'uppercase', letterSpacing: .8 } }, "Fuera de muestra (walk-forward)"),
+                            React.createElement("div", { style: { fontSize: 20, fontWeight: 700, color: result.wf.annReturn >= 0 ? 'var(--green)' : 'var(--red)', margin: '4px 0' } },
+                                pct(result.wf.annReturn),
+                                React.createElement("span", { style: { fontSize: 11, color: 'var(--text-3)', fontWeight: 400 } }, " anual")),
+                            React.createElement("div", { style: { fontSize: 11, color: 'var(--text-2)' } }, `Sharpe ${num(result.wf.sharpeNoRf)} · Máx. DD ${pct(-result.wf.maxDrawdown)} · ${result.wf.weeks} semanas`)),
+                        React.createElement("div", { style: { ...S.cd, padding: 12 } },
+                            React.createElement("div", { style: { fontSize: 10, color: 'var(--text-3)', fontWeight: 600, textTransform: 'uppercase', letterSpacing: .8 } }, "Par\u00E1metros actuales, mismas ventanas"),
+                            React.createElement("div", { style: { fontSize: 20, fontWeight: 700, color: result.baseline.annReturn >= 0 ? 'var(--green)' : 'var(--red)', margin: '4px 0' } },
+                                pct(result.baseline.annReturn),
+                                React.createElement("span", { style: { fontSize: 11, color: 'var(--text-3)', fontWeight: 400 } }, " anual")),
+                            React.createElement("div", { style: { fontSize: 11, color: 'var(--text-2)' } }, `Sharpe ${num(result.baseline.sharpeNoRf)} · Máx. DD ${pct(-result.baseline.maxDrawdown)}`)),
+                        React.createElement("div", { style: { ...S.cd, padding: 12 } },
+                            React.createElement("div", { style: { fontSize: 10, color: 'var(--text-3)', fontWeight: 600, textTransform: 'uppercase', letterSpacing: .8 } }, "Mejor de la rejilla completa (optimista)"),
+                            React.createElement("div", { style: { fontSize: 20, fontWeight: 700, margin: '4px 0' } },
+                                pct((_a = result.bestFull) === null || _a === void 0 ? void 0 : _a.annReturn),
+                                React.createElement("span", { style: { fontSize: 11, color: 'var(--text-3)', fontWeight: 400 } }, " anual")),
+                            React.createElement("div", { style: { fontSize: 11, color: 'var(--text-2)' } }, `${(_b = result.bestFull) === null || _b === void 0 ? void 0 : _b.values.join(' / ')} · eficiencia WF ${result.wfe != null ? (result.wfe * 100).toFixed(0) + '%' : '—'}`))),
+                    React.createElement(WfCurve, { result: result }),
+                    React.createElement("div", { style: { display: 'flex', gap: 14, fontSize: 10, color: 'var(--text-2)', margin: '4px 0 12px' } },
+                        React.createElement("span", null,
+                            React.createElement("span", { style: { display: 'inline-block', width: 14, height: 2, background: 'var(--accent)', verticalAlign: 'middle', marginRight: 4 } }),
+                            "Walk-forward (par\u00E1metros elegidos en cada IS)"),
+                        React.createElement("span", null,
+                            React.createElement("span", { style: { display: 'inline-block', width: 14, height: 0, borderTop: '2px dashed var(--text-3)', verticalAlign: 'middle', marginRight: 4 } }),
+                            "Par\u00E1metros actuales")),
+                    React.createElement("div", { style: { fontSize: 11, fontWeight: 600, color: 'var(--text-2)', marginBottom: 6 } }, `Rejilla completa · ${result.objectiveLabel} (contorno: mejor; discontinuo: actual)`),
+                    React.createElement("div", { style: { overflowX: 'auto', marginBottom: 12 } },
+                        React.createElement(WfHeatmap, { result: result, S: S })),
+                    React.createElement("div", { style: { fontSize: 11, fontWeight: 600, color: 'var(--text-2)', marginBottom: 6 } }, "Tramos"),
+                    React.createElement("div", { style: { overflowX: 'auto' } },
+                        React.createElement("table", { "aria-label": "Tramos walk-forward", style: { width: '100%', borderCollapse: 'collapse', minWidth: 680 } },
+                            React.createElement("thead", null,
+                                React.createElement("tr", null,
+                                    React.createElement("th", { style: { ...th, textAlign: 'left' } }, "#"),
+                                    React.createElement("th", { style: { ...th, textAlign: 'left' } }, "IS"),
+                                    React.createElement("th", { style: { ...th, textAlign: 'left' } }, "OOS"),
+                                    React.createElement("th", { style: th }, "Elegidos"),
+                                    React.createElement("th", { style: th }, `IS ${result.objectiveLabel}`),
+                                    React.createElement("th", { style: th }, "OOS retorno"),
+                                    React.createElement("th", { style: th }, "OOS Sharpe"),
+                                    React.createElement("th", { style: th }, "Actual OOS"),
+                                    React.createElement("th", { style: th }, "Ops OOS"))),
+                            React.createElement("tbody", null, result.folds.map(f => {
+                                var _a, _b, _c, _d, _e, _f, _g, _h, _j, _k;
+                                return (React.createElement("tr", { key: f.index },
+                                    React.createElement("td", { style: { ...td, textAlign: 'left' } }, f.index + 1),
+                                    React.createElement("td", { style: { ...td, textAlign: 'left' } }, `${fmtDate((_a = f.is) === null || _a === void 0 ? void 0 : _a.windowStart)} → ${fmtDate((_b = f.is) === null || _b === void 0 ? void 0 : _b.windowEnd)}`),
+                                    React.createElement("td", { style: { ...td, textAlign: 'left' } }, `${fmtDate((_c = f.oos) === null || _c === void 0 ? void 0 : _c.windowStart)} → ${fmtDate((_d = f.oos) === null || _d === void 0 ? void 0 : _d.windowEnd)}`),
+                                    React.createElement("td", { style: { ...td, color: f.fallback ? 'var(--amber)' : 'var(--text-1)' }, title: f.fallback ? 'Ninguna combinación cumplió el mínimo de operaciones: se usan los valores actuales' : '' }, f.values.join(' / ')),
+                                    React.createElement("td", { style: td }, num(f.isScore)),
+                                    React.createElement("td", { style: { ...td, color: (((_e = f.oos) === null || _e === void 0 ? void 0 : _e.totalReturn) || 0) >= 0 ? 'var(--green)' : 'var(--red)', fontWeight: 600 } }, pct((_f = f.oos) === null || _f === void 0 ? void 0 : _f.totalReturn)),
+                                    React.createElement("td", { style: td }, num((_g = f.oos) === null || _g === void 0 ? void 0 : _g.sharpe)),
+                                    React.createElement("td", { style: { ...td, color: 'var(--text-2)' } }, pct((_h = f.baseline) === null || _h === void 0 ? void 0 : _h.totalReturn)),
+                                    React.createElement("td", { style: td }, (_k = (_j = f.oos) === null || _j === void 0 ? void 0 : _j.trades) !== null && _k !== void 0 ? _k : '—')));
+                            })))),
+                    React.createElement("div", { style: { display: 'flex', gap: 10, alignItems: 'center', flexWrap: 'wrap', marginTop: 12 } },
+                        React.createElement("button", { type: "button", style: S.ghostBtn, onClick: applyLast }, `Aplicar los del último tramo (${(_c = result.folds[result.folds.length - 1]) === null || _c === void 0 ? void 0 : _c.values.join(' / ')})`),
+                        React.createElement("span", { style: { fontSize: 10, color: 'var(--text-3)' } }, 'Estabilidad: ' + Object.entries(result.choiceCounts).sort((a, b) => b[1] - a[1]).map(([k, n]) => `${k} ×${n}`).join(' · '))),
+                    React.createElement("ul", { style: { fontSize: 10, color: 'var(--text-3)', margin: '10px 0 0', paddingLeft: 16, lineHeight: 1.6 } },
+                        React.createElement("li", null, "Cada ventana OOS empieza sin posiciones y con los costes configurados; las ventanas se encadenan por retornos."),
+                        React.createElement("li", null, "La rejilla completa usa todo el periodo para elegir: su resultado es optimista. La curva walk-forward es la estimaci\u00F3n realista."),
+                        React.createElement("li", null, "Eficiencia WF = retorno anual OOS encadenado / retorno anual IS medio de lo elegido. Por debajo de ~50% sugiere sobreajuste."))))));
+    }
     function BacktestWorkspace({ ctx }) {
         var _a, _b, _c;
         const [view, setView] = React.useState('overview');
@@ -1596,6 +1868,7 @@ window.StockScannerTabs = window.StockScannerTabs || {};
                 renderDataBanner(ctx),
                 btDirection !== "short" && renderRulesPanel(entryRules, setEntryRules, exitRules, setExitRules, "Entrada Long", "Salida Long", "var(--green)", "var(--red)", ctx),
                 btDirection !== "long" && renderRulesPanel(shortEntryRules, setShortEntryRules, shortExitRules, setShortExitRules, "Entrada Short", "Salida Short", "var(--purple)", "var(--amber)", ctx)),
+            React.createElement(WalkForwardPanel, { ctx: ctx }),
             backtest && (React.createElement("div", null,
                 React.createElement("nav", { className: "workspace-subnav", "aria-label": "Vistas del backtest" }, [['overview', 'Resumen'], ['trades', 'Operaciones'], ['analysis', 'Análisis'], ['data', 'Datos y diagnóstico']].map(([key, label]) => React.createElement("button", { type: "button", key: key, "aria-current": view === key ? 'page' : undefined, onClick: () => setView(key) }, label))),
                 view === 'data' && React.createElement(React.Fragment, null,

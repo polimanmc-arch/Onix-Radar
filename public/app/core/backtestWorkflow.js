@@ -5,7 +5,7 @@
     const {
       entryRules, exitRules, shortEntryRules, shortExitRules, btDirection,
       stopATR, stopATRMult, stopPct, stopPctVal,
-      btWeeks, btCapital, pfMaxPos, pfRiskFree, btBenchmark, btCommission, btSlippage,
+      btWeeks, btEndOffset, btCapital, pfMaxPos, pfRiskFree, btBenchmark, btCommission, btSlippage,
       pfStopATRPeriod, pfMinWeight, pfMaxWeight, pfMode, btAllocationMode,
       btUniverseSource, btCustomTickers, btUniverseLimit,
       savedUniverseLists,
@@ -417,6 +417,10 @@
       markPerf('benchmarkMs');
 
       const startWeek=btWeeks;
+      // Ventana opcional (walk-forward): la simulación termina btEndOffset semanas antes de hoy.
+      // Señales en startWeek..lastSignalIndex; ejecuciones en startWeek-1..lastSignalIndex-1.
+      const endOffset=Math.max(0,Math.round(Number(btEndOffset)||0));
+      const lastSignalIndex=2+endOffset;
       const atrPeriod=Math.max(1, Math.round(Number(pfStopATRPeriod)||14));
       const minWeight=Math.max(0, (Number(pfMinWeight)||1)/100);
       const maxWeight=Math.max(minWeight || 0.01, Math.min(1, (Number(pfMaxWeight)||25)/100));
@@ -478,7 +482,7 @@
           for(let ti=offset;ti<end;ti++){
             handler(validTickers[ti]);
             if((ti-offset+1)%50===0){
-              await yieldIfNeeded('Simulando semanas',startWeek-signalIndex+Math.min(0.95,(ti+1)/validTickers.length),startWeek-2,{
+              await yieldIfNeeded('Simulando semanas',startWeek-signalIndex+Math.min(0.95,(ti+1)/validTickers.length),startWeek-lastSignalIndex,{
                 current:`${label}: ${Math.min(ti+1,validTickers.length)}/${validTickers.length}`,
                 simulationChunks,
                 simulationYieldCount,
@@ -489,7 +493,7 @@
           if(validTickers.length>1000 && end<validTickers.length){
             simulationYieldCount++;
             const weekDone=startWeek-signalIndex+Math.min(0.95,end/validTickers.length);
-            report('Simulando semanas',weekDone,startWeek-2,{current:`${label}: ${end}/${validTickers.length}`,simulationChunks,simulationYieldCount});
+            report('Simulando semanas',weekDone,startWeek-lastSignalIndex,{current:`${label}: ${end}/${validTickers.length}`,simulationChunks,simulationYieldCount});
             await yieldToUi();
           }
         }
@@ -703,12 +707,14 @@
         return top;
       };
 
-      for(let signalIndex=startWeek;signalIndex>=2;signalIndex--){
+      for(let signalIndex=startWeek;signalIndex>=lastSignalIndex;signalIndex--){
         throwIfCancelled();
         weekAlignedCache = new Map();
         if(signalIndex%4===0){
-          report('Simulando semanas',startWeek-signalIndex,startWeek-2);
-          await yieldToUi();
+          report('Simulando semanas',startWeek-signalIndex,startWeek-lastSignalIndex);
+          // Ceder sólo tras ~24 ms de cálculo: cada cesión cuesta un fotograma (~16 ms) y en
+          // universos pequeños dominaba el tiempo total (clave para el walk-forward).
+          if(shouldYield(24)) await yieldToUi();
           throwIfCancelled();
         }
         const executionIndex=signalIndex-1;
@@ -955,8 +961,9 @@
 
       let benchCurve=null;
       if(benchData&&benchData.closes.length>btWeeks){
+        // Mismas semanas de ejecución que la estrategia (startWeek-1 … lastSignalIndex-1).
         benchCurve=[]; const bStart=benchData.closes[btWeeks];
-        for(let w=btWeeks;w>=1;w--){ benchCurve.push({week:btWeeks-w,value:btCapital*(benchData.closes[w-1]/bStart),time:benchData.times[w-1]||0}); }
+        for(let w=btWeeks;w>=lastSignalIndex;w--){ benchCurve.push({week:btWeeks-w,value:btCapital*(benchData.closes[w-1]/bStart),time:benchData.times[w-1]||0}); }
       }
       const benchReturn=benchCurve?.length?((benchCurve[benchCurve.length-1].value-btCapital)/btCapital):null;
       const mktFilterBlockedWeeks = equityCurve.filter(p=>p.mktBlocked).length;
@@ -969,7 +976,7 @@
         simulationMs:Math.max(0,(perfMarks.simulationMs||totalMs)-(perfMarks.regimeMs||perfMarks.benchmarkMs||perfMarks.dataMs||0)),
         resultsMs:Math.max(0,totalMs-(perfMarks.simulationMs||totalMs)),
       };
-      const result={equityCurve,weeklyLog,startVal,endVal,totalReturn,annReturn,annVol,sharpe,maxDrawdown:maxDD2,trades:tradeCount,allTrades:compactTrades,weeks:btWeeks,capital:btCapital,winRate,avgWin,avgLoss,profitFactor,sortino,calmar,avgDuration,benchCurve,benchReturn,benchSymbol:btBenchmark,riskFreePct:Number(pfRiskFree)||0,totalCommissionPaid,commission:btCommission||0,slippage:btSlippage||0,atrPeriod,allocationMode:btAllocationMode||'equal',timestamp:Date.now(),label:'Estrategia '+(savedStrategiesLength+1),
+      const result={equityCurve,weeklyLog,startVal,endVal,totalReturn,annReturn,annVol,sharpe,maxDrawdown:maxDD2,trades:tradeCount,allTrades:compactTrades,weeks:btWeeks,endOffset,windowStart:ts0?.[startWeek-1]||null,windowEnd:ts0?.[lastSignalIndex-1]||null,capital:btCapital,winRate,avgWin,avgLoss,profitFactor,sortino,calmar,avgDuration,benchCurve,benchReturn,benchSymbol:btBenchmark,riskFreePct:Number(pfRiskFree)||0,totalCommissionPaid,commission:btCommission||0,slippage:btSlippage||0,atrPeriod,allocationMode:btAllocationMode||'equal',timestamp:Date.now(),label:'Estrategia '+(savedStrategiesLength+1),
         status:validTrades.length?'ok':'no_trades',
         diagnostics:{signalStats,loadStats,tickerIssues:tickerIssues.slice(0,500),validTickers:validTickers.length},
         perf:{...perfMarks,totalMs,stages:perfStages,alignedCacheSize:maxWeekAlignedCacheSize,tickers:validTickers.length,loadStats,tickerIssues:tickerIssues.slice(0,500),signalStats,intrabarFetches,validTrades:validTrades.length,invalidTrades:allTrades.length-validTrades.length,lightMemory:backtestLocalOnlyCache,trimmedSeriesCount,trimmedBarsSaved,maxRuleLookback,simulationChunkSize,simulationChunks,simulationYieldCount,fastRuleEvalCount:ruleEvaluator.stats.evalCount,fastRuleFallbackCount:ruleEvaluator.stats.fallbackCount,cacheEntriesBefore,cacheEntriesAfter,cacheTickersReleased,batchChartRequests,batchChartSymbols,batchFetchConcurrency,transientCacheHits,transientCacheWrites,transientCacheReleased,transientCacheRemaining:transientDataCache.size,cooperativeYieldCount,cooperativeLongSliceCount},

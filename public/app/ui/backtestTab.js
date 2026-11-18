@@ -1695,6 +1695,229 @@ function renderTickerIssues(backtest, ctx){
   return <TickerIssuesPanel backtest={backtest} S={ctx.S}/>;
 }
 
+// ── Optimización walk-forward ──────────────────────────────────────────────
+// Busca parámetros dentro de muestra y los valida en la ventana siguiente fuera de muestra.
+const WF_OBJECTIVES=[['sharpe','Sharpe'],['annReturn','Retorno anual'],['calmar','Calmar'],['sortino','Sortino']];
+const WF_RULE_SETTERS={entryRules:'setEntryRules',exitRules:'setExitRules',shortEntryRules:'setShortEntryRules',shortExitRules:'setShortExitRules',mktFilterRules:'setMktFilterRules'};
+function wfEstimateUniverse(ctx){
+  const src=ctx.btUniverseSource||'scan';
+  let n=0;
+  if(src==='custom') n=(ctx.btCustomTickers||'').split(/[\s,;]+/).filter(Boolean).length;
+  else if(src==='scan') n=Object.keys(ctx.dataCacheRef?.current||{}).filter(t=>!t.startsWith('__')).length;
+  else n=window.StockScannerConfig?.UNIVERSE_PRESETS?.[src]?.tickers?.length||(ctx.savedUniverseLists||[]).find(l=>'LIST_'+l.id===src)?.tickers?.length||0;
+  const limit=Math.round(Number(ctx.btUniverseLimit)||0);
+  return limit>0?Math.min(n,limit):n;
+}
+function WfHeatmap({ result, S }){
+  const {grid,params,bestFull}=result;
+  const fmt=v=>Number.isFinite(v)?v.toFixed(2):'—';
+  const scores=grid.map(g=>g.score).filter(Number.isFinite);
+  const lo=Math.min(...scores,0), hi=Math.max(...scores,0);
+  const cellStyle=v=>{
+    if(!Number.isFinite(v)) return {color:'var(--text-3)'};
+    const t=v>=0?(hi>0?v/hi:0):(lo<0?v/lo:0);
+    const pct=Math.round(10+Math.min(1,Math.abs(t))*60);
+    return {background:`color-mix(in srgb, ${v>=0?'var(--green)':'var(--red)'} ${pct}%, transparent)`,color:'var(--text-0)'};
+  };
+  const isCurrent=vals=>vals.every((v,i)=>v===params[i].current);
+  const isBest=vals=>bestFull&&vals.every((v,i)=>v===bestFull.values[i]);
+  const td={fontSize:11,padding:'6px 8px',textAlign:'center',fontVariantNumeric:'tabular-nums',borderRadius:3};
+  const mark=vals=>({outline:isBest(vals)?'2px solid var(--accent)':isCurrent(vals)?'1px dashed var(--text-2)':'none',outlineOffset:-2});
+  if(params.length===1){
+    return <table aria-label="Rejilla de parámetros" style={{borderCollapse:'separate',borderSpacing:2}}>
+      <thead><tr><th style={{...td,textAlign:'left',color:'var(--text-3)'}}>{params[0].label}</th>{grid.map((g,i)=><th key={i} style={{...td,color:'var(--text-2)'}}>{g.values[0]}</th>)}</tr></thead>
+      <tbody><tr><td style={{...td,textAlign:'left',color:'var(--text-3)'}}>{result.objectiveLabel}</td>{grid.map((g,i)=><td key={i} style={{...td,...cellStyle(g.score),...mark(g.values)}} title={`Retorno anual ${(g.annReturn*100).toFixed(1)}% · ${g.trades} operaciones`}>{fmt(g.score)}</td>)}</tr></tbody>
+    </table>;
+  }
+  const xs=[...new Set(grid.map(g=>g.values[0]))], ys=[...new Set(grid.map(g=>g.values[1]))];
+  const at=(x,y)=>grid.find(g=>g.values[0]===x&&g.values[1]===y);
+  return <table aria-label="Rejilla de parámetros" style={{borderCollapse:'separate',borderSpacing:2}}>
+    <thead><tr><th style={{...td,color:'var(--text-3)',textAlign:'left'}}>{params[1].label} ↓ / {params[0].label} →</th>{xs.map(x=><th key={x} style={{...td,color:'var(--text-2)'}}>{x}</th>)}</tr></thead>
+    <tbody>{ys.map(y=><tr key={y}><th style={{...td,color:'var(--text-2)',textAlign:'right'}}>{y}</th>{xs.map(x=>{const g=at(x,y);return <td key={x} style={{...td,...cellStyle(g?.score),...(g?mark(g.values):{})}} title={g?`Retorno anual ${(g.annReturn*100).toFixed(1)}% · ${g.trades} operaciones`:''}>{fmt(g?.score)}</td>;})}</tr>)}</tbody>
+  </table>;
+}
+function WfCurve({ result }){
+  const a=result.wf.curve, b=result.baseline.curve;
+  if(a.length<2) return null;
+  const all=[...a,...b].map(p=>p.value);
+  const lo=Math.min(...all), hi=Math.max(...all), rg=(hi-lo)||1, W=100, H=40;
+  const pts=c=>c.map((p,i)=>(i/(c.length-1)*W).toFixed(2)+','+(H-((p.value-lo)/rg)*H).toFixed(2)).join(' ');
+  return <svg role="img" aria-label="Curva fuera de muestra encadenada" viewBox={`0 0 ${W} ${H}`} preserveAspectRatio="none" style={{width:'100%',height:160}}>
+    {b.length>1&&<polyline points={pts(b)} fill="none" stroke="var(--text-3)" strokeWidth="1.2" strokeDasharray="3 2" vectorEffect="non-scaling-stroke"/>}
+    <polyline points={pts(a)} fill="none" stroke="var(--accent)" strokeWidth="1.8" vectorEffect="non-scaling-stroke"/>
+  </svg>;
+}
+function WalkForwardPanel({ ctx }){
+  const core=window.StockScannerCore;
+  const {S,btRunning,btWeeks}=ctx;
+  const [open,setOpen]=React.useState(false);
+  const [sel,setSel]=React.useState(['','']);
+  const [ranges,setRanges]=React.useState([null,null]);
+  const [isWeeks,setIsWeeks]=React.useState(52);
+  const [oosWeeks,setOosWeeks]=React.useState(13);
+  const [anchored,setAnchored]=React.useState(false);
+  const [objective,setObjective]=React.useState('sharpe');
+  const [minTrades,setMinTrades]=React.useState(5);
+  const [running,setRunning]=React.useState(false);
+  const [progress,setProgress]=React.useState(null);
+  const [result,setResult]=React.useState(null);
+  const [error,setError]=React.useState(null);
+  const abortRef=React.useRef(null);
+  React.useEffect(()=>()=>abortRef.current?.abort(),[]);
+  const available=React.useMemo(()=>open?core.listOptimizableParams(ctx.getBacktestBaseOptions()):[],
+    [open,ctx.entryRules,ctx.exitRules,ctx.shortEntryRules,ctx.shortExitRules,ctx.btDirection,ctx.stopATR,ctx.stopATRMult,ctx.stopPct,ctx.stopPctVal,ctx.mktFilterEnabled,ctx.mktFilterRules]);
+  // Selección por defecto: el primer parámetro disponible.
+  React.useEffect(()=>{
+    if(!open) return;
+    setSel(prev=>{
+      const ids=available.map(p=>p.id);
+      const a=ids.includes(prev[0])?prev[0]:(ids[0]||'');
+      const b=ids.includes(prev[1])&&prev[1]!==a?prev[1]:'';
+      return a===prev[0]&&b===prev[1]?prev:[a,b];
+    });
+  },[open,available]);
+  const chosen=sel.map(id=>available.find(p=>p.id===id)).filter(Boolean);
+  React.useEffect(()=>{ setRanges(sel.map(id=>{ const p=available.find(x=>x.id===id); return p?core.suggestRange(p):null; })); },[sel[0],sel[1],available]);
+  const activeRanges=sel.map((id,i)=>available.find(p=>p.id===id)?ranges[i]:null).filter(Boolean);
+  const combos=chosen.length&&activeRanges.length===chosen.length?core.buildWalkForwardGrid(chosen,activeRanges).length:0;
+  const folds=core.buildWalkForwardFolds({totalWeeks:Number(btWeeks)||0,isWeeks:Number(isWeeks)||0,oosWeeks:Number(oosWeeks)||0,anchored});
+  const runs=combos+folds.length*combos+folds.length*2;
+  const universe=wfEstimateUniverse(ctx);
+  const {MAX_COMBOS}=core.WALK_FORWARD_LIMITS;
+  const blocker=!chosen.length?'Añade reglas con valores numéricos para poder optimizar.'
+    :combos===0?'El rango no produce valores.'
+    :combos>MAX_COMBOS?`${combos} combinaciones: el máximo es ${MAX_COMBOS}.`
+    :!folds.length?`El periodo (${btWeeks} semanas) no admite ${isWeeks} IS + ${oosWeeks} OOS.`
+    :universe>900?'Para el walk-forward limita el universo a 900 símbolos como máximo (Límite universo).'
+    :null;
+  const run=async()=>{
+    const ac=new AbortController(); abortRef.current=ac;
+    setRunning(true); setError(null); setResult(null); setProgress(null);
+    try{
+      const out=await core.runWalkForward({base:ctx.getBacktestBaseOptions(),params:chosen,ranges:activeRanges,
+        isWeeks:Number(isWeeks),oosWeeks:Number(oosWeeks),anchored,objective,minTrades:Number(minTrades)||0,
+        abortSignal:ac.signal,onProgress:setProgress});
+      if(out.ok) setResult(out); else setError(out.message||'No se pudo completar.');
+    }catch(e){ setError(e?.message||'Error'); }
+    finally{ setRunning(false); abortRef.current=null; }
+  };
+  const applyLast=()=>{
+    const last=result?.folds?.[result.folds.length-1]; if(!last) return;
+    const params=result.params.map(p=>available.find(x=>x.id===p.id)).filter(Boolean);
+    if(params.length!==result.params.length){ setError('Las reglas cambiaron desde el cálculo: vuelve a ejecutarlo.'); return; }
+    const next=core.applyWalkForwardParams(ctx.getBacktestBaseOptions(),params,last.values);
+    params.forEach(p=>{
+      if(p.global){ const setter=p.global==='stopATRMult'?ctx.setStopATRMult:ctx.setStopPctVal; setter?.(next[p.global]); }
+      else ctx[WF_RULE_SETTERS[p.key]]?.(next[p.key]);
+    });
+  };
+  const pct=v=>Number.isFinite(v)?`${v>=0?'+':''}${(v*100).toFixed(1)}%`:'—';
+  const num=v=>Number.isFinite(v)?v.toFixed(2):'—';
+  const fmtDate=t=>t?new Date(t*1000).toISOString().slice(0,10):'—';
+  const inp={...S.inp,width:70,textAlign:'center'};
+  const lbl={fontSize:10,color:'var(--text-2)',marginBottom:5};
+  const setRange=(i,field,val)=>setRanges(r=>r.map((x,j)=>j===i&&x?{...x,[field]:val}:x));
+  const th={fontSize:10,color:'var(--text-3)',fontWeight:600,padding:'6px 8px',textAlign:'right',borderBottom:'1px solid var(--row-divider)',whiteSpace:'nowrap'};
+  const td={fontSize:11,padding:'6px 8px',textAlign:'right',fontVariantNumeric:'tabular-nums',borderBottom:'1px solid var(--row-divider)',whiteSpace:'nowrap'};
+  return (
+    <section className="walk-forward" aria-label="Optimización walk-forward" style={{...S.panel,marginBottom:10}}>
+      <button type="button" onClick={()=>setOpen(v=>!v)} aria-expanded={open}
+        style={{display:'flex',justifyContent:'space-between',alignItems:'center',width:'100%',padding:'12px 14px',background:'none',border:'none',cursor:'pointer',textAlign:'left',color:'var(--text-1)'}}>
+        <span><strong style={{fontSize:13}}>Optimización walk-forward</strong><span style={{display:'block',fontSize:11,color:'var(--text-2)',marginTop:2}}>Elige parámetros en una ventana y compruébalos en la siguiente, sin mirar el futuro.</span></span>
+        <span style={{fontSize:10,color:'var(--text-2)'}}>{open?'Ocultar':'Mostrar'}</span>
+      </button>
+      {open&&<div style={{padding:'0 14px 14px'}}>
+        <div style={{display:'grid',gap:10}}>
+          {[0,1].map(i=>(
+            <div key={i} style={{display:'flex',gap:10,flexWrap:'wrap',alignItems:'flex-end'}}>
+              <div style={{flex:'1 1 260px',minWidth:0}}><div style={lbl}>{i===0?'Parámetro 1':'Parámetro 2 (opcional)'}</div>
+                <select aria-label={i===0?'Parámetro 1':'Parámetro 2'} value={sel[i]} onChange={e=>setSel(s=>s.map((x,j)=>j===i?e.target.value:x))} style={{...S.inp,width:'100%'}}>
+                  {i===1&&<option value="">— Ninguno —</option>}
+                  {available.filter(p=>i===0||p.id!==sel[0]).map(p=><option key={p.id} value={p.id}>{`${p.label} (actual ${p.current})`}</option>)}
+                </select></div>
+              {ranges[i]&&sel[i]&&['from','to','step'].map(field=>(
+                <div key={field}><div style={lbl}>{({from:'Desde',to:'Hasta',step:'Paso'})[field]}</div>
+                  <input type="number" aria-label={`${({from:'Desde',to:'Hasta',step:'Paso'})[field]} parámetro ${i+1}`} value={ranges[i][field]} step="any" onChange={e=>setRange(i,field,e.target.value)} style={inp}/></div>
+              ))}
+            </div>
+          ))}
+          <div style={{display:'flex',gap:10,flexWrap:'wrap',alignItems:'flex-end'}}>
+            <div><div style={lbl}>Ventana IS (semanas)</div><input type="number" aria-label="Ventana IS en semanas" min={8} value={isWeeks} onChange={e=>setIsWeeks(e.target.value)} style={inp}/></div>
+            <div><div style={lbl}>Ventana OOS (semanas)</div><input type="number" aria-label="Ventana OOS en semanas" min={4} value={oosWeeks} onChange={e=>setOosWeeks(e.target.value)} style={inp}/></div>
+            <div><div style={lbl}>Objetivo</div><select aria-label="Objetivo" value={objective} onChange={e=>setObjective(e.target.value)} style={{...S.inp,width:130}}>{WF_OBJECTIVES.map(([k,l])=><option key={k} value={k}>{l}</option>)}</select></div>
+            <div><div style={lbl}>Mín. operaciones IS</div><input type="number" aria-label="Mínimo de operaciones dentro de muestra" min={0} value={minTrades} onChange={e=>setMinTrades(e.target.value)} style={inp}/></div>
+            <label style={{display:'flex',gap:6,alignItems:'center',fontSize:11,color:'var(--text-2)',paddingBottom:6}}><input type="checkbox" checked={anchored} onChange={e=>setAnchored(e.target.checked)}/>IS anclada al inicio</label>
+          </div>
+          <div style={{display:'flex',gap:10,alignItems:'center',flexWrap:'wrap'}}>
+            {!running&&<button type="button" style={S.btnG(true)} onClick={run} disabled={!!blocker||btRunning}>Ejecutar walk-forward</button>}
+            {running&&<button type="button" style={S.ghostBtn} onClick={()=>abortRef.current?.abort()}>Cancelar</button>}
+            <span role="status" style={{fontSize:11,color:blocker?'var(--amber)':'var(--text-2)'}}>
+              {running&&progress?`${progress.phase} · ${progress.done}/${progress.total} ejecuciones`
+                :blocker||`${combos} combinaciones × ${folds.length} tramos → ${runs} ejecuciones del backtest`}
+            </span>
+          </div>
+          {error&&<div role="alert" style={{fontSize:11,color:'var(--amber)'}}>{error}</div>}
+        </div>
+
+        {result&&<div style={{marginTop:14}}>
+          <div className="ro-stack-mobile" style={{display:'grid',gridTemplateColumns:'repeat(3,1fr)',gap:10,marginBottom:12}}>
+            <div style={{...S.cd,padding:12}}>
+              <div style={{fontSize:10,color:'var(--text-3)',fontWeight:600,textTransform:'uppercase',letterSpacing:.8}}>Fuera de muestra (walk-forward)</div>
+              <div style={{fontSize:20,fontWeight:700,color:result.wf.annReturn>=0?'var(--green)':'var(--red)',margin:'4px 0'}}>{pct(result.wf.annReturn)}<span style={{fontSize:11,color:'var(--text-3)',fontWeight:400}}> anual</span></div>
+              <div style={{fontSize:11,color:'var(--text-2)'}}>{`Sharpe ${num(result.wf.sharpeNoRf)} · Máx. DD ${pct(-result.wf.maxDrawdown)} · ${result.wf.weeks} semanas`}</div>
+            </div>
+            <div style={{...S.cd,padding:12}}>
+              <div style={{fontSize:10,color:'var(--text-3)',fontWeight:600,textTransform:'uppercase',letterSpacing:.8}}>Parámetros actuales, mismas ventanas</div>
+              <div style={{fontSize:20,fontWeight:700,color:result.baseline.annReturn>=0?'var(--green)':'var(--red)',margin:'4px 0'}}>{pct(result.baseline.annReturn)}<span style={{fontSize:11,color:'var(--text-3)',fontWeight:400}}> anual</span></div>
+              <div style={{fontSize:11,color:'var(--text-2)'}}>{`Sharpe ${num(result.baseline.sharpeNoRf)} · Máx. DD ${pct(-result.baseline.maxDrawdown)}`}</div>
+            </div>
+            <div style={{...S.cd,padding:12}}>
+              <div style={{fontSize:10,color:'var(--text-3)',fontWeight:600,textTransform:'uppercase',letterSpacing:.8}}>Mejor de la rejilla completa (optimista)</div>
+              <div style={{fontSize:20,fontWeight:700,margin:'4px 0'}}>{pct(result.bestFull?.annReturn)}<span style={{fontSize:11,color:'var(--text-3)',fontWeight:400}}> anual</span></div>
+              <div style={{fontSize:11,color:'var(--text-2)'}}>{`${result.bestFull?.values.join(' / ')} · eficiencia WF ${result.wfe!=null?(result.wfe*100).toFixed(0)+'%':'—'}`}</div>
+            </div>
+          </div>
+          <WfCurve result={result}/>
+          <div style={{display:'flex',gap:14,fontSize:10,color:'var(--text-2)',margin:'4px 0 12px'}}>
+            <span><span style={{display:'inline-block',width:14,height:2,background:'var(--accent)',verticalAlign:'middle',marginRight:4}}/>Walk-forward (parámetros elegidos en cada IS)</span>
+            <span><span style={{display:'inline-block',width:14,height:0,borderTop:'2px dashed var(--text-3)',verticalAlign:'middle',marginRight:4}}/>Parámetros actuales</span>
+          </div>
+          <div style={{fontSize:11,fontWeight:600,color:'var(--text-2)',marginBottom:6}}>{`Rejilla completa · ${result.objectiveLabel} (contorno: mejor; discontinuo: actual)`}</div>
+          <div style={{overflowX:'auto',marginBottom:12}}><WfHeatmap result={result} S={S}/></div>
+          <div style={{fontSize:11,fontWeight:600,color:'var(--text-2)',marginBottom:6}}>Tramos</div>
+          <div style={{overflowX:'auto'}}>
+            <table aria-label="Tramos walk-forward" style={{width:'100%',borderCollapse:'collapse',minWidth:680}}>
+              <thead><tr><th style={{...th,textAlign:'left'}}>#</th><th style={{...th,textAlign:'left'}}>IS</th><th style={{...th,textAlign:'left'}}>OOS</th><th style={th}>Elegidos</th><th style={th}>{`IS ${result.objectiveLabel}`}</th><th style={th}>OOS retorno</th><th style={th}>OOS Sharpe</th><th style={th}>Actual OOS</th><th style={th}>Ops OOS</th></tr></thead>
+              <tbody>{result.folds.map(f=>(
+                <tr key={f.index}>
+                  <td style={{...td,textAlign:'left'}}>{f.index+1}</td>
+                  <td style={{...td,textAlign:'left'}}>{`${fmtDate(f.is?.windowStart)} → ${fmtDate(f.is?.windowEnd)}`}</td>
+                  <td style={{...td,textAlign:'left'}}>{`${fmtDate(f.oos?.windowStart)} → ${fmtDate(f.oos?.windowEnd)}`}</td>
+                  <td style={{...td,color:f.fallback?'var(--amber)':'var(--text-1)'}} title={f.fallback?'Ninguna combinación cumplió el mínimo de operaciones: se usan los valores actuales':''}>{f.values.join(' / ')}</td>
+                  <td style={td}>{num(f.isScore)}</td>
+                  <td style={{...td,color:(f.oos?.totalReturn||0)>=0?'var(--green)':'var(--red)',fontWeight:600}}>{pct(f.oos?.totalReturn)}</td>
+                  <td style={td}>{num(f.oos?.sharpe)}</td>
+                  <td style={{...td,color:'var(--text-2)'}}>{pct(f.baseline?.totalReturn)}</td>
+                  <td style={td}>{f.oos?.trades??'—'}</td>
+                </tr>
+              ))}</tbody>
+            </table>
+          </div>
+          <div style={{display:'flex',gap:10,alignItems:'center',flexWrap:'wrap',marginTop:12}}>
+            <button type="button" style={S.ghostBtn} onClick={applyLast}>{`Aplicar los del último tramo (${result.folds[result.folds.length-1]?.values.join(' / ')})`}</button>
+            <span style={{fontSize:10,color:'var(--text-3)'}}>{'Estabilidad: '+Object.entries(result.choiceCounts).sort((a,b)=>b[1]-a[1]).map(([k,n])=>`${k} ×${n}`).join(' · ')}</span>
+          </div>
+          <ul style={{fontSize:10,color:'var(--text-3)',margin:'10px 0 0',paddingLeft:16,lineHeight:1.6}}>
+            <li>Cada ventana OOS empieza sin posiciones y con los costes configurados; las ventanas se encadenan por retornos.</li>
+            <li>La rejilla completa usa todo el periodo para elegir: su resultado es optimista. La curva walk-forward es la estimación realista.</li>
+            <li>Eficiencia WF = retorno anual OOS encadenado / retorno anual IS medio de lo elegido. Por debajo de ~50% sugiere sobreajuste.</li>
+          </ul>
+        </div>}
+      </div>}
+    </section>
+  );
+}
+
 function BacktestWorkspace({ctx}){
   const [view,setView]=React.useState('overview');
   const [configOpen,setConfigOpen]=React.useState(!ctx.backtest);
@@ -1720,6 +1943,7 @@ function BacktestWorkspace({ctx}){
       {btDirection!=="long"&&renderRulesPanel(shortEntryRules,setShortEntryRules,shortExitRules,setShortExitRules,"Entrada Short","Salida Short","var(--purple)","var(--amber)",ctx)}
 
       </div>}
+      <WalkForwardPanel ctx={ctx}/>
       {backtest&&(
         <div>
           <nav className="workspace-subnav" aria-label="Vistas del backtest">{[['overview','Resumen'],['trades','Operaciones'],['analysis','Análisis'],['data','Datos y diagnóstico']].map(([key,label])=><button type="button" key={key} aria-current={view===key?'page':undefined} onClick={()=>setView(key)}>{label}</button>)}</nav>

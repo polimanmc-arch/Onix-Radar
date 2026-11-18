@@ -29,6 +29,7 @@
     ['StockScannerCore.runScanWorkflow',        window.StockScannerCore?.runScanWorkflow],
     ['StockScannerCore.runBacktestWorkflow',    window.StockScannerCore?.runBacktestWorkflow],
     ['StockScannerCore.buildPortfolioWorkflow', window.StockScannerCore?.buildPortfolioWorkflow],
+    ['StockScannerCore.runWalkForward',         window.StockScannerCore?.runWalkForward],
     ['StockScannerCore.computeTearsheet',       window.StockScannerCore?.computeTearsheet],
 
     // Layer 4 — State (defaults.js must precede state hooks)

@@ -401,6 +401,10 @@ function App() {
         pfMaxPos, pfRiskFree, pfStopATRPeriod, pfMinWeight, pfMaxWeight, pfMode,
         mktFilterEnabled, mktFilterTicker, mktFilterTf, mktFilterInd, mktFilterPeriod, mktFilterOp, mktFilterVal, mktFilterRules,
     }), [btWeeks, btCapital, btBenchmark, btDirection, entryRules, exitRules, shortEntryRules, shortExitRules, stopATR, stopATRMult, stopPct, stopPctVal, btCommission, btSlippage, btUniverseSource, btCustomTickers, btUniverseLimit, btAllocationMode, pfMaxPos, pfRiskFree, pfStopATRPeriod, pfMinWeight, pfMaxWeight, pfMode, mktFilterEnabled, mktFilterTicker, mktFilterTf, mktFilterInd, mktFilterPeriod, mktFilterOp, mktFilterVal, mktFilterRules]);
+    // Configuración completa del backtest para el walk-forward (que lo ejecuta muchas veces).
+    const getBacktestBaseOptions = useCallback(() => ({
+        ...collectBacktestPreset(), savedUniverseLists, dataCacheRef,
+    }), [collectBacktestPreset, savedUniverseLists, dataCacheRef]);
     const saveBacktestPreset = useCallback(() => {
         const name = (btPresetName || '').trim();
         if (!name)
@@ -915,7 +919,7 @@ function App() {
         exportPortfolioPresets, importPortfolioPresets,
         portfolioWatchlistActions,
         // Backtest state
-        backtest, btRunning, btProgress, btWeeks, setBtWeeks, btCapital, setBtCapital,
+        backtest, btRunning, btProgress, btWeeks, setBtWeeks, btCapital, setBtCapital, getBacktestBaseOptions,
         btBenchmark, setBtBenchmark, btDirection, setBtDirection,
         stopATR, setStopATR, stopATRMult, setStopATRMult,
         stopPct, setStopPct, stopPctVal, setStopPctVal,
