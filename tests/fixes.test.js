@@ -11,7 +11,7 @@ const plain = v=>JSON.parse(JSON.stringify(v));
 
 function load(files, extra={}){
   const ctx=vm.createContext({window:{},console,setTimeout,clearTimeout,AbortController,Date,Math,...extra});
-  for(const f of ['config/timeframes.js','core/indicators.js','core/engine.js',...files]){
+  for(const f of ['config/timeframes.js','core/indicators.js','core/engine.js','core/ruleEvaluator.js',...files]){
     vm.runInContext(fs.readFileSync(path.join(root,'public/app',f),'utf8'),ctx);
   }
   return ctx.window.StockScannerCore;

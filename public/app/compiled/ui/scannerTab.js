@@ -631,11 +631,92 @@ window.StockScannerTabs = window.StockScannerTabs || {};
                     ResultsHeader(ctx, shown.length, results.length),
                     ResultsTable(ctx, row === null || row === void 0 ? void 0 : row.ticker, setSelectedTicker)),
                 React.createElement(ScannerInspector, { row: row, dataCacheRef: dataCacheRef, onOpen: ctx.setSelectedChart, side: ctx.scanDirection, filters: ctx.scanDirection === 'short' ? ctx.shortFilters : ctx.filters })),
+            hasResults && !scanning && React.createElement(SignalPerformancePanel, { ctx: ctx, selectedTicker: row === null || row === void 0 ? void 0 : row.ticker }),
             logLines.length > 0 && React.createElement("div", { className: "workspace-log" },
                 React.createElement("button", { type: "button", style: S.ghostBtn, "aria-expanded": logOpen, onClick: () => setLogOpen(v => !v) },
                     "Actividad ",
                     logOpen ? '−' : '+'),
                 logOpen && React.createElement("div", { style: { ...S.panel, marginTop: 6, padding: 12, maxHeight: 160, overflow: 'auto' } }, logLines.map((line, i) => React.createElement("div", { key: i, style: { fontSize: 10, lineHeight: 1.7, color: 'var(--text-2)', fontFamily: 'var(--font-mono)' } }, line))))));
+    }
+    // ── Rendimiento histórico de la señal ───────────────────────────────────────
+    // Recorre el historial ya descargado del universo escaneado y mide qué pasó después de cada
+    // vela en la que se cumplían los filtros actuales, frente a la media de todas las velas.
+    function SignalPerformancePanel({ ctx, selectedTicker }) {
+        const { S, dataCacheRef, scanDirection, scanning } = ctx;
+        const filters = scanDirection === 'short' ? ctx.shortFilters : ctx.filters;
+        const [state, setState] = useState({ status: 'idle' });
+        const [progress, setProgress] = useState(null);
+        const runId = useRef(0);
+        useEffect(() => { runId.current++; setState({ status: 'idle' }); setProgress(null); }, [filters, scanDirection, scanning]);
+        useEffect(() => () => { runId.current++; }, []);
+        const run = async () => {
+            const id = ++runId.current;
+            setState({ status: 'running' });
+            setProgress(null);
+            try {
+                const out = await window.StockScannerCore.computeSignalPerformance({
+                    dataByTicker: dataCacheRef.current, filters, direction: scanDirection,
+                    yieldToUi: () => new Promise(resolve => setTimeout(resolve, 0)),
+                    isCancelled: () => runId.current !== id,
+                    onProgress: p => { if (runId.current === id)
+                        setProgress(p); },
+                });
+                if (runId.current !== id)
+                    return;
+                setState(out.ok ? { status: 'done', result: out } : { status: 'error', message: out.message || 'No se pudo calcular.' });
+            }
+            catch (error) {
+                if (runId.current === id)
+                    setState({ status: 'error', message: (error === null || error === void 0 ? void 0 : error.message) || 'Error' });
+            }
+        };
+        const pct = v => v == null || !Number.isFinite(v) ? '-' : `${v >= 0 ? '+' : ''}${(v * 100).toFixed(2)}%`;
+        const rate = v => v == null ? '-' : `${(v * 100).toFixed(0)}%`;
+        const fmtDate = t => t ? new Date(t * 1000).toISOString().slice(0, 10) : '-';
+        const tone = v => v == null ? 'var(--text-2)' : v > 0 ? 'var(--green)' : v < 0 ? 'var(--red)' : 'var(--text-2)';
+        const r = state.result;
+        const mine = r && selectedTicker ? r.byTicker[selectedTicker] : null;
+        const th = { fontSize: 10, color: 'var(--text-3)', fontWeight: 600, padding: '6px 8px', textAlign: 'right', borderBottom: '1px solid var(--row-divider)', whiteSpace: 'nowrap' };
+        const td = { fontSize: 12, padding: '7px 8px', textAlign: 'right', fontVariantNumeric: 'tabular-nums', borderBottom: '1px solid var(--row-divider)', whiteSpace: 'nowrap' };
+        return (React.createElement("section", { className: "signal-performance", "aria-label": "Rendimiento hist\u00F3rico de la se\u00F1al", style: { ...S.panel, marginTop: 10, padding: 14 } },
+            React.createElement("div", { style: { display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', gap: 12, flexWrap: 'wrap' } },
+                React.createElement("div", { style: { minWidth: 0, flex: '1 1 280px' } },
+                    React.createElement("strong", { style: { fontSize: 13 } }, "Rendimiento hist\u00F3rico de la se\u00F1al"),
+                    React.createElement("div", { style: { fontSize: 11, color: 'var(--text-2)', marginTop: 3 } }, "Qu\u00E9 pas\u00F3 en el universo escaneado despu\u00E9s de cada vela en la que se cumpl\u00EDan estos filtros, frente a la media de todas las velas.")),
+                React.createElement("button", { type: "button", style: S.ghostBtn, onClick: run, disabled: state.status === 'running', "aria-busy": state.status === 'running' }, state.status === 'running' ? 'Calculando…' : state.status === 'done' ? 'Recalcular' : 'Calcular')),
+            state.status === 'running' && React.createElement("div", { role: "status", style: { fontSize: 11, color: 'var(--text-2)', marginTop: 10 } }, `Analizando ${progress ? progress.done + '/' + progress.total + ' ' : ''}símbolos…`),
+            state.status === 'error' && React.createElement("div", { role: "alert", style: { fontSize: 11, color: 'var(--amber)', marginTop: 10 } }, state.message),
+            state.status === 'done' && r && React.createElement(React.Fragment, null,
+                React.createElement("div", { style: { fontSize: 11, color: 'var(--text-2)', margin: '10px 0 6px' } }, `${r.signals.toLocaleString()} señales (${r.episodes.toLocaleString()} episodios) en ${r.tickersWithSignals} de ${r.tickersUsed} símbolos · ${fmtDate(r.firstTime)} → ${fmtDate(r.lastTime)} · base ${r.baseTf.toUpperCase()} · ${r.direction === 'short' ? 'Short' : 'Long'}`),
+                r.signals > 0 ? React.createElement("div", { style: { overflowX: 'auto' } },
+                    React.createElement("table", { "aria-label": "Retornos tras la se\u00F1al", style: { width: '100%', borderCollapse: 'collapse', minWidth: 560 } },
+                        React.createElement("thead", null,
+                            React.createElement("tr", null,
+                                React.createElement("th", { style: { ...th, textAlign: 'left' } }, "Horizonte"),
+                                React.createElement("th", { style: th }, "Se\u00F1ales"),
+                                React.createElement("th", { style: th }, "Retorno medio"),
+                                React.createElement("th", { style: th }, "Mediana"),
+                                React.createElement("th", { style: th }, "% acierto"),
+                                React.createElement("th", { style: th, title: "Retorno medio de todas las velas evaluables del universo" }, "Base"),
+                                React.createElement("th", { style: th, title: "Retorno medio con se\u00F1al menos base" }, "Ventaja"))),
+                        React.createElement("tbody", null, r.aggregate.map(a => (React.createElement("tr", { key: a.bars },
+                            React.createElement("td", { style: { ...td, textAlign: 'left' } }, a.label),
+                            React.createElement("td", { style: td }, a.n.toLocaleString()),
+                            React.createElement("td", { style: { ...td, color: tone(a.mean), fontWeight: 600 } }, pct(a.mean)),
+                            React.createElement("td", { style: { ...td, color: tone(a.median) } }, pct(a.median)),
+                            React.createElement("td", { style: td },
+                                rate(a.hitRate),
+                                " ",
+                                React.createElement("span", { style: { color: 'var(--text-3)', fontSize: 10 } }, `vs ${rate(a.baseHitRate)}`)),
+                            React.createElement("td", { style: { ...td, color: 'var(--text-2)' } }, pct(a.baseMean)),
+                            React.createElement("td", { style: { ...td, color: tone(a.edge), fontWeight: 700 } }, pct(a.edge)))))))) : React.createElement("div", { style: { fontSize: 12, color: 'var(--text-2)' } }, "Los filtros no se cumplieron en ninguna vela cerrada del historial disponible."),
+                selectedTicker && React.createElement("div", { style: { fontSize: 11, color: 'var(--text-2)', marginTop: 10 } }, mine ? `${selectedTicker}: ${mine.signals} señales (${mine.episodes} episodios) · ` + mine.horizons.map((h, i) => `${r.horizons[i].label} ${pct(h.mean)} (${rate(h.hitRate)} acierto)`).join(' · ')
+                    : `${selectedTicker}: sin señales en el historial disponible.`),
+                React.createElement("ul", { style: { fontSize: 10, color: 'var(--text-3)', margin: '10px 0 0', paddingLeft: 16, lineHeight: 1.6 } },
+                    React.createElement("li", null, "Entrada en la apertura siguiente a la vela de se\u00F1al y salida al cierre tras el horizonte, sin costes. S\u00F3lo velas cerradas en todas las temporalidades."),
+                    React.createElement("li", null, "Las se\u00F1ales consecutivas de un mismo s\u00EDmbolo se solapan; los episodios cuentan s\u00F3lo la primera vela de cada racha."),
+                    React.createElement("li", null, "El universo es el actual: los s\u00EDmbolos que dejaron de cotizar no aparecen (sesgo de supervivencia)."),
+                    r.usesMeta && React.createElement("li", { style: { color: 'var(--amber)' } }, "Los filtros fundamentales usan valores actuales en todo el historial.")))));
     }
     const ScannerInspector = React.memo(function ScannerInspector({ row, dataCacheRef, onOpen, side, filters }) {
         var _a;
