@@ -179,7 +179,7 @@ window.StockScannerTabs = window.StockScannerTabs || {};
     // ── Config card (unchanged behavior, kept here for clarity) ────────────────
     function ConfigCard(ctx) {
         var _a, _b, _c;
-        const { S, pfCapital, setPfCapital, pfMinWeight, setPfMinWeight, pfMaxWeight, setPfMaxWeight, pfMaxPos, setPfMaxPos, pfRiskFree, setPfRiskFree, pfUniverseSource, setPfUniverseSource, pfSims, setPfSims, pfMode, setPfMode, pfStopType, setPfStopType, pfStopATRMult, setPfStopATRMult, pfStopATRPeriod, setPfStopATRPeriod, pfStopPctVal, setPfStopPctVal, pfCorFilter, setPfCorFilter, pfCorThresh, setPfCorThresh, portfolio, pfConfigOpen, setPfConfigOpen, pfPreset, setPfPreset, savedPfPresets, pfPresetName, setPfPresetName, selectedPfPresetId, setSelectedPfPresetId, savePortfolioPreset, loadPortfolioPreset, deletePortfolioPreset, exportPortfolioPresets, importPortfolioPresets, PF_DEFAULTS } = ctx;
+        const { S, pfCapital, setPfCapital, pfMinWeight, setPfMinWeight, pfMaxWeight, setPfMaxWeight, pfMaxPos, setPfMaxPos, pfRiskFree, setPfRiskFree, pfUniverseSource, setPfUniverseSource, pfSims, setPfSims, pfSeed, setPfSeed, pfMode, setPfMode, pfStopType, setPfStopType, pfStopATRMult, setPfStopATRMult, pfStopATRPeriod, setPfStopATRPeriod, pfStopPctVal, setPfStopPctVal, pfCorFilter, setPfCorFilter, pfCorThresh, setPfCorThresh, portfolio, pfConfigOpen, setPfConfigOpen, pfPreset, setPfPreset, savedPfPresets, pfPresetName, setPfPresetName, selectedPfPresetId, setSelectedPfPresetId, savePortfolioPreset, loadPortfolioPreset, deletePortfolioPreset, exportPortfolioPresets, importPortfolioPresets, PF_DEFAULTS } = ctx;
         const inp = { ...S.inp, width: "100%", height: 38, minHeight: 38, padding: "7px 12px", fontSize: 12, lineHeight: "20px", background: "var(--bg-2)" };
         const selStyle = { ...inp, minWidth: 0 };
         const [minWeightDraft, setMinWeightDraft] = useState(String((_a = pfMinWeight !== null && pfMinWeight !== void 0 ? pfMinWeight : PF_DEFAULTS === null || PF_DEFAULTS === void 0 ? void 0 : PF_DEFAULTS.minWeight) !== null && _a !== void 0 ? _a : 1));
@@ -312,6 +312,10 @@ window.StockScannerTabs = window.StockScannerTabs || {};
                         React.createElement("option", { value: 25000 }, "25,000"),
                         React.createElement("option", { value: 50000 }, "50,000"),
                         React.createElement("option", { value: 100000 }, "100,000"))),
+                React.createElement(Field, { label: "Semilla" },
+                    React.createElement("input", { type: "number", min: 0, step: 1, value: pfSeed !== null && pfSeed !== void 0 ? pfSeed : '', disabled: pfMode === 'equalweight', title: "Misma semilla y configuraci\u00F3n producen el mismo portafolio. C\u00E1mbiala para explorar otras muestras.", onChange: e => { const raw = e.target.value; setPfPreset('custom'); if (raw === '')
+                            return setPfSeed(42); const n = Number(raw); if (Number.isFinite(n))
+                            setPfSeed(Math.max(0, Math.round(n))); }, style: inp })),
                 React.createElement(Field, { label: "Optimizaci\u00F3n" },
                     React.createElement("select", { value: pfMode, onChange: e => { setPfPreset('custom'); setPfMode(e.target.value); }, style: selStyle },
                         React.createElement("option", { value: "maxsharpe" }, "Max Sharpe"),
@@ -432,6 +436,9 @@ window.StockScannerTabs = window.StockScannerTabs || {};
             React.createElement("span", { style: S.statusBadge("neutral") },
                 (portfolio.simsUsed || pfSims).toLocaleString(),
                 " muestras"),
+            portfolio.seed != null && React.createElement("span", { style: S.statusBadge("neutral"), title: "Semilla del muestreo" },
+                "Semilla ",
+                portfolio.seed),
             React.createElement("span", { style: S.statusBadge("neutral") }, portfolio.source === "manual" ? "Manual" : "Scanner"),
             portfolio.removedByCor > 0 && React.createElement("span", { style: S.statusBadge("warning") },
                 "Corr removidas ",

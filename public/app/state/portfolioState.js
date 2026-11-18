@@ -15,6 +15,7 @@
       corThresh: 0.80,
       mode: 'maxsharpe',
       sims: 30000,
+      seed: 42,
       stopType: 'none',
       stopATRMult: 2,
       stopATRPeriod: 14,
@@ -55,6 +56,7 @@
     const [pfCorThresh,setPfCorThresh] = useState(() => getNum('onix_pf_cor_thresh', PF_DEFAULTS.corThresh, { min: 0.5, max: 0.99 }));
     const [pfMode,setPfMode] = useState(() => getStr('onix_pf_mode', PF_DEFAULTS.mode));
     const [pfSims,setPfSims] = useState(() => getNum('onix_pf_sims', PF_DEFAULTS.sims, { min: 1, max: 250000, disallowZero: true }));
+    const [pfSeed,setPfSeed] = useState(() => getNum('onix_pf_seed', PF_DEFAULTS.seed, { min: 0, max: 2147483647 }));
     const [pfStopType,setPfStopType] = useState(() => getStr('onix_pf_stop_type', PF_DEFAULTS.stopType));
     const [pfStopATRMult,setPfStopATRMult] = useState(() => getNum('onix_pf_stop_atr_mult', PF_DEFAULTS.stopATRMult, { min: 0.5, max: 5 }));
     const [pfStopATRPeriod,setPfStopATRPeriod] = useState(() => getNum('onix_pf_stop_atr_period', PF_DEFAULTS.stopATRPeriod, { min: 1, max: 200, disallowZero: true }));
@@ -83,6 +85,7 @@
     useEffect(() => { localStorage.setItem('onix_pf_cor_thresh', String(pfCorThresh ?? PF_DEFAULTS.corThresh)); }, [pfCorThresh]);
     useEffect(() => { localStorage.setItem('onix_pf_mode', pfMode || PF_DEFAULTS.mode); }, [pfMode]);
     useEffect(() => { localStorage.setItem('onix_pf_sims', String(pfSims ?? PF_DEFAULTS.sims)); }, [pfSims]);
+    useEffect(() => { localStorage.setItem('onix_pf_seed', String(pfSeed ?? PF_DEFAULTS.seed)); }, [pfSeed]);
     useEffect(() => { localStorage.setItem('onix_pf_stop_type', pfStopType || PF_DEFAULTS.stopType); }, [pfStopType]);
     useEffect(() => { localStorage.setItem('onix_pf_stop_atr_mult', String(pfStopATRMult ?? PF_DEFAULTS.stopATRMult)); }, [pfStopATRMult]);
     useEffect(() => { localStorage.setItem('onix_pf_stop_atr_period', String(pfStopATRPeriod ?? PF_DEFAULTS.stopATRPeriod)); }, [pfStopATRPeriod]);
@@ -100,6 +103,7 @@
       if (!Number.isFinite(pfRiskFree) || pfRiskFree < 0) setPfRiskFree(PF_DEFAULTS.riskFree);
       if (!Number.isFinite(pfCorThresh) || pfCorThresh < 0.5 || pfCorThresh > 0.99) setPfCorThresh(PF_DEFAULTS.corThresh);
       if (!Number.isFinite(pfSims) || pfSims < 1) setPfSims(PF_DEFAULTS.sims);
+      if (!Number.isFinite(pfSeed) || pfSeed < 0) setPfSeed(PF_DEFAULTS.seed);
       if (!Number.isFinite(pfStopATRMult) || pfStopATRMult < 0.5) setPfStopATRMult(PF_DEFAULTS.stopATRMult);
       if (!Number.isFinite(pfStopATRPeriod) || pfStopATRPeriod < 1) setPfStopATRPeriod(PF_DEFAULTS.stopATRPeriod);
       if (!Number.isFinite(pfStopPctVal) || pfStopPctVal < 1) setPfStopPctVal(PF_DEFAULTS.stopPctVal);
@@ -115,6 +119,7 @@
       pfCorThresh,setPfCorThresh,
       pfMode,setPfMode,
       pfSims,setPfSims,
+      pfSeed,setPfSeed,
       pfStopType,setPfStopType,
       pfStopATRMult,setPfStopATRMult,
       pfStopATRPeriod,setPfStopATRPeriod,

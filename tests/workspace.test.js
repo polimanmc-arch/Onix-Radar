@@ -269,3 +269,20 @@ test('equity and line-only drawdown expose pointer and keyboard tooltips without
   assert.equal(tree.root.findAllByProps({role:'tooltip'}).length,0);
   await Renderer.act(async()=>tree.unmount());
 });
+
+test('analysis view shows the performance report with monthly heatmap, drawdowns and benchmark stats',async()=>{
+  const {tree,window}=await mountApp();
+  const start=Math.floor(Date.UTC(2025,0,6,5)/1000), W=7*86400;
+  let v=10000,b=500;
+  const equityCurve=[], benchCurve=[{week:0,time:start-W,value:500}];
+  for(let i=0;i<40;i++){ const r=0.01*Math.sin(i); v*=1+r; b*=1+r/2; equityCurve.push({time:start+i*W,value:v,holdings:1}); benchCurve.push({week:i+1,time:start+i*W,value:b}); }
+  await Renderer.act(async()=>window.backtestState.setBacktest(reportFixture({equityCurve,benchCurve,benchSymbol:'SPY',endVal:v,riskFreePct:0})));
+  await Renderer.act(async()=>tree.root.findByProps({'aria-label':'Backtest'}).props.onClick());
+  await Renderer.act(async()=>tree.root.findByProps({'aria-label':'Vistas del backtest'}).findAllByType('button')[2].props.onClick());
+  assert.equal(tree.root.findAllByProps({'aria-label':'Retornos mensuales'}).length,1);
+  assert.equal(tree.root.findAllByProps({'aria-label':'Peores drawdowns'}).length,1);
+  const text=JSON.stringify(tree.toJSON());
+  assert.ok(text.includes('Frente a SPY'));
+  assert.ok(text.includes('Beta'));
+  await Renderer.act(async()=>tree.unmount());
+});

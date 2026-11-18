@@ -46,7 +46,7 @@ function App() {
     const portfolioState = usePortfolioState(React);
     const backtestState = useBacktestState(React);
     const { preset, setPreset, universeIds, setUniverseIds, tText, setTText, scanDirection, setScanDirection, filters, setFilters, shortFilters, setShortFilters, results, setResults, scanning, setScanning, prog, setProg, sortK, setSortK, sortD, setSortD, onlyPass, setOnlyPass, search, setSearch, logLines, setLogLines, visRows, setVisRows, conc, setConc, fetchingAll, setFetchingAll, sectorData, setSectorData, minHistoryYears, setMinHistoryYears, abortRef, logRef, savedFilterSets, setSavedFilterSets, savedScanPresets, setSavedScanPresets, scanPresetName, setScanPresetName, selectedScanPresetId, setSelectedScanPresetId, savedUniverseLists, setSavedUniverseLists, universeListName, setUniverseListName, selectedUniverseListId, setSelectedUniverseListId, filterSetName, setFilterSetName, selectedFilterSetId, setSelectedFilterSetId, } = scannerState;
-    const { portfolio, setPortfolio, pfCapital, setPfCapital, pfMaxWeight, setPfMaxWeight, pfMaxPos, setPfMaxPos, pfRiskFree, setPfRiskFree, pfCorFilter, setPfCorFilter, pfCorThresh, setPfCorThresh, pfMode, setPfMode, pfSims, setPfSims, pfStopType, setPfStopType, pfStopATRMult, setPfStopATRMult, pfStopATRPeriod, setPfStopATRPeriod, pfStopPctVal, setPfStopPctVal, pfUniverseSource, setPfUniverseSource, pfManualTickers, setPfManualTickers, pfWatchlists, setPfWatchlists, pfWatchlistName, setPfWatchlistName, pfSelectedWatchlistId, setPfSelectedWatchlistId, pfBuilding, setPfBuilding, pfMinWeight, setPfMinWeight, pfConfigOpen, setPfConfigOpen, pfManualOpen, setPfManualOpen, pfPreset, setPfPreset, savedPfPresets, setSavedPfPresets, pfPresetName, setPfPresetName, selectedPfPresetId, setSelectedPfPresetId, PF_DEFAULTS, pfCsvInputRef, } = portfolioState;
+    const { portfolio, setPortfolio, pfCapital, setPfCapital, pfMaxWeight, setPfMaxWeight, pfMaxPos, setPfMaxPos, pfRiskFree, setPfRiskFree, pfCorFilter, setPfCorFilter, pfCorThresh, setPfCorThresh, pfMode, setPfMode, pfSims, setPfSims, pfSeed, setPfSeed, pfStopType, setPfStopType, pfStopATRMult, setPfStopATRMult, pfStopATRPeriod, setPfStopATRPeriod, pfStopPctVal, setPfStopPctVal, pfUniverseSource, setPfUniverseSource, pfManualTickers, setPfManualTickers, pfWatchlists, setPfWatchlists, pfWatchlistName, setPfWatchlistName, pfSelectedWatchlistId, setPfSelectedWatchlistId, pfBuilding, setPfBuilding, pfMinWeight, setPfMinWeight, pfConfigOpen, setPfConfigOpen, pfManualOpen, setPfManualOpen, pfPreset, setPfPreset, savedPfPresets, setSavedPfPresets, pfPresetName, setPfPresetName, selectedPfPresetId, setSelectedPfPresetId, PF_DEFAULTS, pfCsvInputRef, } = portfolioState;
     const { backtest, setBacktest, btRunning, setBtRunning, btProgress, setBtProgress, btWeeks, setBtWeeks, btCapital, setBtCapital, btBenchmark, setBtBenchmark, savedStrategies, setSavedStrategies, entryRules, setEntryRules, exitRules, setExitRules, stopATR, setStopATR, stopATRMult, setStopATRMult, stopPct, setStopPct, stopPctVal, setStopPctVal, btDirection, setBtDirection, shortEntryRules, setShortEntryRules, shortExitRules, setShortExitRules, btCommission, setBtCommission, btSlippage, setBtSlippage, btUniverseSource, setBtUniverseSource, btCustomTickers, setBtCustomTickers, btUniverseLimit, setBtUniverseLimit, btUniverseListName, setBtUniverseListName, btEditingListId, setBtEditingListId, btOptionsOpen, setBtOptionsOpen, btUniverseOpen, setBtUniverseOpen, btAllocationMode, setBtAllocationMode, mktFilterEnabled, setMktFilterEnabled, mktFilterTicker, setMktFilterTicker, mktFilterTf, setMktFilterTf, mktFilterInd, setMktFilterInd, mktFilterPeriod, setMktFilterPeriod, mktFilterOp, setMktFilterOp, mktFilterVal, setMktFilterVal, mktFilterRules, setMktFilterRules, savedBtPresets, setSavedBtPresets, btPresetName, setBtPresetName, selectedBtPresetId, setSelectedBtPresetId, } = backtestState;
     const dataCacheRef = useRef({});
     const btAbortRef = useRef(null);
@@ -278,10 +278,10 @@ function App() {
     }, [pfManualTickers, pfWatchlistName, notify]);
     const collectPortfolioPreset = useCallback(() => ({
         pfCapital, pfMinWeight, pfMaxWeight, pfMaxPos, pfRiskFree,
-        pfCorFilter, pfCorThresh, pfMode, pfSims,
+        pfCorFilter, pfCorThresh, pfMode, pfSims, pfSeed,
         pfStopType, pfStopATRMult, pfStopATRPeriod, pfStopPctVal,
         pfUniverseSource, pfManualTickers, pfPreset,
-    }), [pfCapital, pfMinWeight, pfMaxWeight, pfMaxPos, pfRiskFree, pfCorFilter, pfCorThresh, pfMode, pfSims, pfStopType, pfStopATRMult, pfStopATRPeriod, pfStopPctVal, pfUniverseSource, pfManualTickers, pfPreset]);
+    }), [pfCapital, pfMinWeight, pfMaxWeight, pfMaxPos, pfRiskFree, pfCorFilter, pfCorThresh, pfMode, pfSims, pfSeed, pfStopType, pfStopATRMult, pfStopATRPeriod, pfStopPctVal, pfUniverseSource, pfManualTickers, pfPreset]);
     const applyPortfolioPresetConfig = useCallback((cfg = {}) => {
         if (cfg.pfCapital != null)
             setPfCapital(Number(cfg.pfCapital) || PF_DEFAULTS.capital);
@@ -301,6 +301,8 @@ function App() {
             setPfMode(cfg.pfMode);
         if (cfg.pfSims != null)
             setPfSims(Number(cfg.pfSims) || PF_DEFAULTS.sims);
+        if (cfg.pfSeed != null && Number.isFinite(Number(cfg.pfSeed)))
+            setPfSeed(Number(cfg.pfSeed));
         if (cfg.pfStopType)
             setPfStopType(cfg.pfStopType);
         if (cfg.pfStopATRMult != null)
@@ -512,7 +514,7 @@ function App() {
         try {
             const out = await buildPortfolioWorkflow({
                 results, filters, shortFilters, pfCapital, pfMinWeight, pfMaxWeight, pfMaxPos, pfRiskFree,
-                pfCorFilter, pfCorThresh, pfMode, pfSims, pfStopType, pfStopATRMult, pfStopATRPeriod, pfStopPctVal,
+                pfCorFilter, pfCorThresh, pfMode, pfSims, pfSeed, pfStopType, pfStopATRMult, pfStopATRPeriod, pfStopPctVal,
                 sectorData, scanDirection, pfUniverseSource, pfManualTickers,
                 fetchSectors, dataCacheRef, setPfBuilding, setTab, setPortfolio,
             });
@@ -529,7 +531,7 @@ function App() {
             notify({ type: 'error', title: 'Error construyendo portafolio', message: (e === null || e === void 0 ? void 0 : e.message) || String(e) });
             setPfBuilding(false);
         }
-    }, [results, filters, shortFilters, pfCapital, pfMinWeight, pfMaxWeight, pfMaxPos, pfRiskFree, pfCorFilter, pfCorThresh, pfMode, pfSims, pfStopType, pfStopATRMult, pfStopATRPeriod, pfStopPctVal, sectorData, scanDirection, pfUniverseSource, pfManualTickers, fetchSectors, notify]);
+    }, [results, filters, shortFilters, pfCapital, pfMinWeight, pfMaxWeight, pfMaxPos, pfRiskFree, pfCorFilter, pfCorThresh, pfMode, pfSims, pfSeed, pfStopType, pfStopATRMult, pfStopATRPeriod, pfStopPctVal, sectorData, scanDirection, pfUniverseSource, pfManualTickers, fetchSectors, notify]);
     const refreshDataCacheStatus = useCallback(async ({ silent = false } = {}) => {
         var _a;
         setDataCacheBusy(true);
@@ -895,7 +897,7 @@ function App() {
         portfolio, pfCapital, setPfCapital, pfMinWeight, setPfMinWeight, pfMaxWeight, setPfMaxWeight,
         pfMaxPos, setPfMaxPos, pfRiskFree, setPfRiskFree,
         pfCorFilter, setPfCorFilter, pfCorThresh, setPfCorThresh,
-        pfMode, setPfMode, pfSims, setPfSims,
+        pfMode, setPfMode, pfSims, setPfSims, pfSeed, setPfSeed,
         pfStopType, setPfStopType, pfStopATRMult, setPfStopATRMult, pfStopATRPeriod, setPfStopATRPeriod, pfStopPctVal, setPfStopPctVal,
         pfUniverseSource, setPfUniverseSource, pfManualTickers, setPfManualTickers,
         pfWatchlists, pfWatchlistName, setPfWatchlistName,

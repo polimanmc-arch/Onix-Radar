@@ -72,7 +72,7 @@ function App(){
     portfolio, setPortfolio, pfCapital, setPfCapital, pfMaxWeight, setPfMaxWeight,
     pfMaxPos, setPfMaxPos, pfRiskFree, setPfRiskFree,
     pfCorFilter, setPfCorFilter, pfCorThresh, setPfCorThresh,
-    pfMode, setPfMode, pfSims, setPfSims,
+    pfMode, setPfMode, pfSims, setPfSims, pfSeed, setPfSeed,
     pfStopType, setPfStopType, pfStopATRMult, setPfStopATRMult, pfStopATRPeriod, setPfStopATRPeriod, pfStopPctVal, setPfStopPctVal,
     pfUniverseSource, setPfUniverseSource, pfManualTickers, setPfManualTickers,
     pfWatchlists, setPfWatchlists, pfWatchlistName, setPfWatchlistName,
@@ -325,10 +325,10 @@ function App(){
 
   const collectPortfolioPreset = useCallback(()=>({
     pfCapital,pfMinWeight,pfMaxWeight,pfMaxPos,pfRiskFree,
-    pfCorFilter,pfCorThresh,pfMode,pfSims,
+    pfCorFilter,pfCorThresh,pfMode,pfSims,pfSeed,
     pfStopType,pfStopATRMult,pfStopATRPeriod,pfStopPctVal,
     pfUniverseSource,pfManualTickers,pfPreset,
-  }), [pfCapital,pfMinWeight,pfMaxWeight,pfMaxPos,pfRiskFree,pfCorFilter,pfCorThresh,pfMode,pfSims,pfStopType,pfStopATRMult,pfStopATRPeriod,pfStopPctVal,pfUniverseSource,pfManualTickers,pfPreset]);
+  }), [pfCapital,pfMinWeight,pfMaxWeight,pfMaxPos,pfRiskFree,pfCorFilter,pfCorThresh,pfMode,pfSims,pfSeed,pfStopType,pfStopATRMult,pfStopATRPeriod,pfStopPctVal,pfUniverseSource,pfManualTickers,pfPreset]);
 
   const applyPortfolioPresetConfig = useCallback((cfg={})=>{
     if(cfg.pfCapital!=null) setPfCapital(Number(cfg.pfCapital)||PF_DEFAULTS.capital);
@@ -340,6 +340,7 @@ function App(){
     if(cfg.pfCorThresh!=null) setPfCorThresh(Number(cfg.pfCorThresh)||PF_DEFAULTS.corThresh);
     if(cfg.pfMode) setPfMode(cfg.pfMode);
     if(cfg.pfSims!=null) setPfSims(Number(cfg.pfSims)||PF_DEFAULTS.sims);
+    if(cfg.pfSeed!=null&&Number.isFinite(Number(cfg.pfSeed))) setPfSeed(Number(cfg.pfSeed));
     if(cfg.pfStopType) setPfStopType(cfg.pfStopType);
     if(cfg.pfStopATRMult!=null) setPfStopATRMult(Number(cfg.pfStopATRMult)||PF_DEFAULTS.stopATRMult);
     if(cfg.pfStopATRPeriod!=null) setPfStopATRPeriod(Number(cfg.pfStopATRPeriod)||PF_DEFAULTS.stopATRPeriod);
@@ -506,7 +507,7 @@ function App(){
     try{
       const out=await buildPortfolioWorkflow({
         results,filters,shortFilters,pfCapital,pfMinWeight,pfMaxWeight,pfMaxPos,pfRiskFree,
-        pfCorFilter,pfCorThresh,pfMode,pfSims,pfStopType,pfStopATRMult,pfStopATRPeriod,pfStopPctVal,
+        pfCorFilter,pfCorThresh,pfMode,pfSims,pfSeed,pfStopType,pfStopATRMult,pfStopATRPeriod,pfStopPctVal,
         sectorData,scanDirection,pfUniverseSource,pfManualTickers,
         fetchSectors,dataCacheRef,setPfBuilding,setTab,setPortfolio,
       });
@@ -517,7 +518,7 @@ function App(){
       else if(out?.ok) notify({type:'success',title:'Portafolio listo',message:'La optimizacion termino correctamente.'});
       return out;
     }catch(e){ console.error('buildPortfolio fatal',e); notify({type:'error',title:'Error construyendo portafolio',message:e?.message||String(e)}); setPfBuilding(false); }
-  }, [results,filters,shortFilters,pfCapital,pfMinWeight,pfMaxWeight,pfMaxPos,pfRiskFree,pfCorFilter,pfCorThresh,pfMode,pfSims,pfStopType,pfStopATRMult,pfStopATRPeriod,pfStopPctVal,sectorData,scanDirection,pfUniverseSource,pfManualTickers,fetchSectors,notify]);
+  }, [results,filters,shortFilters,pfCapital,pfMinWeight,pfMaxWeight,pfMaxPos,pfRiskFree,pfCorFilter,pfCorThresh,pfMode,pfSims,pfSeed,pfStopType,pfStopATRMult,pfStopATRPeriod,pfStopPctVal,sectorData,scanDirection,pfUniverseSource,pfManualTickers,fetchSectors,notify]);
 
   const refreshDataCacheStatus = useCallback(async({silent=false}={})=>{
     setDataCacheBusy(true);
@@ -851,7 +852,7 @@ function App(){
     portfolio, pfCapital, setPfCapital, pfMinWeight, setPfMinWeight, pfMaxWeight, setPfMaxWeight,
     pfMaxPos, setPfMaxPos, pfRiskFree, setPfRiskFree,
     pfCorFilter, setPfCorFilter, pfCorThresh, setPfCorThresh,
-    pfMode, setPfMode, pfSims, setPfSims,
+    pfMode, setPfMode, pfSims, setPfSims, pfSeed, setPfSeed,
     pfStopType, setPfStopType, pfStopATRMult, setPfStopATRMult, pfStopATRPeriod, setPfStopATRPeriod, pfStopPctVal, setPfStopPctVal,
     pfUniverseSource, setPfUniverseSource, pfManualTickers, setPfManualTickers,
     pfWatchlists, pfWatchlistName, setPfWatchlistName,

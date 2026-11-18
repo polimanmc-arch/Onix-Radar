@@ -234,7 +234,7 @@ function SectionCard({ S, title, subtitle, isOpen, onToggle, children }){
 
 function ConfigCard(ctx){
   const {S,pfCapital,setPfCapital,pfMinWeight,setPfMinWeight,pfMaxWeight,setPfMaxWeight,pfMaxPos,setPfMaxPos,pfRiskFree,setPfRiskFree,
-    pfUniverseSource,setPfUniverseSource,pfSims,setPfSims,pfMode,setPfMode,
+    pfUniverseSource,setPfUniverseSource,pfSims,setPfSims,pfSeed,setPfSeed,pfMode,setPfMode,
     pfStopType,setPfStopType,pfStopATRMult,setPfStopATRMult,pfStopATRPeriod,setPfStopATRPeriod,pfStopPctVal,setPfStopPctVal,
     pfCorFilter,setPfCorFilter,pfCorThresh,setPfCorThresh,portfolio,pfConfigOpen,setPfConfigOpen,pfPreset,setPfPreset,
     savedPfPresets,pfPresetName,setPfPresetName,selectedPfPresetId,setSelectedPfPresetId,
@@ -372,6 +372,11 @@ function ConfigCard(ctx){
             <option value={50000}>50,000</option>
             <option value={100000}>100,000</option>
           </select>
+        </Field>
+        <Field label="Semilla">
+          <input type="number" min={0} step={1} value={pfSeed ?? ''} disabled={pfMode==='equalweight'}
+            title="Misma semilla y configuración producen el mismo portafolio. Cámbiala para explorar otras muestras."
+            onChange={e=>{ const raw=e.target.value; setPfPreset('custom'); if(raw==='') return setPfSeed(42); const n=Number(raw); if(Number.isFinite(n)) setPfSeed(Math.max(0, Math.round(n))); }} style={inp}/>
         </Field>
         <Field label="Optimización">
           <select value={pfMode} onChange={e=>{ setPfPreset('custom'); setPfMode(e.target.value); }} style={selStyle}>
@@ -548,6 +553,7 @@ function InfoBar({ portfolio, pfSims, pfStopType, scanDirection, S }){
       <span style={{...S.statusBadge("neutral"),color:sideColor}}>Lado {sideLabel}</span>
       <span style={S.statusBadge("info")}>{modeLabel}</span>
       <span style={S.statusBadge("neutral")}>{(portfolio.simsUsed||pfSims).toLocaleString()} muestras</span>
+      {portfolio.seed!=null && <span style={S.statusBadge("neutral")} title="Semilla del muestreo">Semilla {portfolio.seed}</span>}
       <span style={S.statusBadge("neutral")}>{portfolio.source==="manual"?"Manual":"Scanner"}</span>
       {portfolio.removedByCor>0 && <span style={S.statusBadge("warning")}>Corr removidas {portfolio.removedByCor}</span>}
       <span style={S.statusBadge("neutral")}>Caja ${portfolio.cash.toFixed(0)}</span>

@@ -128,9 +128,9 @@ window.StockScannerTabs = window.StockScannerTabs || {};
         const allocationLabel = ({
             equal: 'Equal weight',
             maxsharpe: 'Max Sharpe',
-            minvol: 'Min Varianza',
-            maxret: 'Max Return',
-            portfolio: "Como Portafolio (" + (pfMode || "maxsharpe") + ")",
+            minvol: 'Inversa a la volatilidad',
+            maxret: 'Max Return (momentum)',
+            portfolio: "Criterio del Portafolio (" + (pfMode || "maxsharpe") + ")",
         })[btAllocationMode || 'equal'] || 'Equal weight';
         const exportBtPresets = () => {
             const items = Array.isArray(savedBtPresets) ? savedBtPresets : [];
@@ -218,12 +218,12 @@ window.StockScannerTabs = window.StockScannerTabs || {};
                         React.createElement("div", { className: "bt-setting-fields" },
                             React.createElement("div", null,
                                 React.createElement("div", { style: { fontSize: 10, color: "var(--text-2)", marginBottom: 7 } }, "Distribuci\u00F3n"),
-                                React.createElement("select", { value: btAllocationMode || "equal", onChange: e => setBtAllocationMode(e.target.value), style: { ...S.inp, width: 150 } },
+                                React.createElement("select", { value: btAllocationMode || "equal", onChange: e => setBtAllocationMode(e.target.value), style: { ...S.inp, width: 150 }, title: "Pesos por se\u00F1al con las 12 semanas previas. Respetan Min/Max peso; si no cabe el 100%, el resto queda en efectivo. No usan la matriz de covarianza del Portafolio." },
                                     React.createElement("option", { value: "equal" }, "Equal weight"),
-                                    React.createElement("option", { value: "maxsharpe" }, "Max Sharpe"),
-                                    React.createElement("option", { value: "minvol" }, "Min Varianza"),
-                                    React.createElement("option", { value: "maxret" }, "Max Return"),
-                                    React.createElement("option", { value: "portfolio" }, "Como Portafolio"))),
+                                    React.createElement("option", { value: "maxsharpe" }, "Max Sharpe (Sharpe 12s)"),
+                                    React.createElement("option", { value: "minvol" }, "Inversa a la volatilidad"),
+                                    React.createElement("option", { value: "maxret" }, "Max Return (momentum 12s)"),
+                                    React.createElement("option", { value: "portfolio" }, "Criterio del Portafolio"))),
                             React.createElement("div", null,
                                 React.createElement("div", { style: { fontSize: 10, color: "var(--text-2)", marginBottom: 7 } }, "M\u00E1x. posiciones"),
                                 React.createElement("input", { type: "number", className: "numeric-value-input", min: 2, max: 50, value: pfMaxPos, onChange: e => setPfMaxPos(+e.target.value || 20), style: { ...S.inp, width: 50, textAlign: "center" } })),
@@ -777,7 +777,7 @@ window.StockScannerTabs = window.StockScannerTabs || {};
         if (((_a = backtest.benchCurve) === null || _a === void 0 ? void 0 : _a.length) > 1)
             bPts = backtest.benchCurve.map((d, i) => (i / (backtest.benchCurve.length - 1) * W).toFixed(2) + "," + mp(d.value).toFixed(2)).join(" ");
         const sPts = savedStrategies.map(s => { var _a; return ((_a = s.equityCurve) === null || _a === void 0 ? void 0 : _a.length) > 1 ? s.equityCurve.map((d, i) => (i / (s.equityCurve.length - 1) * W).toFixed(2) + "," + mp(d.value).toFixed(2)).join(" ") : ""; });
-        let pk = 0;
+        let pk = Number(backtest.startVal) || Number(backtest.capital) || 0;
         const dd = data.map(d => { if (d.value > pk)
             pk = d.value; return { v: pk > 0 ? -((pk - d.value) / pk) * 100 : 0 }; });
         const mn = Math.min(...dd.map(d => d.v));
@@ -1133,6 +1133,102 @@ window.StockScannerTabs = window.StockScannerTabs || {};
                     React.createElement(MonthlyPnlChart, { backtest: backtest, S: S }),
                     React.createElement(ScatterChart, { backtest: backtest, S: S }))))));
     }
+    // ── Informe de rendimiento (tearsheet): mapa mensual, drawdowns, Sharpe móvil y benchmark ──
+    const MONTHS_SHORT = ['Ene', 'Feb', 'Mar', 'Abr', 'May', 'Jun', 'Jul', 'Ago', 'Sep', 'Oct', 'Nov', 'Dic'];
+    function heatCellStyle(ret, maxAbs) {
+        if (ret == null)
+            return { color: 'var(--text-3)' };
+        const strength = Math.min(1, Math.abs(ret) / (maxAbs || 1));
+        const pct = Math.round(12 + strength * 58);
+        const base = ret >= 0 ? 'var(--green)' : 'var(--red)';
+        return { background: `color-mix(in srgb, ${base} ${pct}%, transparent)`, color: 'var(--text-0)' };
+    }
+    function PerformanceReport({ backtest, S, riskFreePct }) {
+        var _a;
+        const computeTearsheet = (_a = window.StockScannerCore) === null || _a === void 0 ? void 0 : _a.computeTearsheet;
+        const ts = React.useMemo(() => computeTearsheet ? computeTearsheet({
+            equityCurve: backtest.equityCurve, startVal: backtest.startVal, benchCurve: backtest.benchCurve, riskFreePct,
+        }) : null, [backtest, riskFreePct, computeTearsheet]);
+        if (!ts || !ts.monthly.length)
+            return null;
+        const pct = (v, d = 1) => v == null || !Number.isFinite(v) ? '-' : `${v >= 0 ? '+' : ''}${(v * 100).toFixed(d)}%`;
+        const fmtDate = t => t ? new Date(t * 1000).toISOString().slice(0, 10) : '-';
+        const maxAbs = Math.max(...ts.monthly.map(m => Math.abs(m.ret)), 0.01);
+        const th = { fontSize: 10, color: 'var(--text-3)', fontWeight: 600, padding: '5px 4px', textAlign: 'right' };
+        const td = { fontSize: 11, padding: '5px 4px', textAlign: 'right', fontVariantNumeric: 'tabular-nums', whiteSpace: 'nowrap' };
+        const bench = ts.benchmark;
+        const rs = ts.rollingSharpe;
+        const rsMin = Math.min(0, ...rs.map(p => p.value)), rsMax = Math.max(0, ...rs.map(p => p.value));
+        const rsRange = (rsMax - rsMin) || 1;
+        const W = 100, H = 30;
+        const rsY = v => H - ((v - rsMin) / rsRange) * H;
+        const rsPts = rs.map((p, i) => ((rs.length > 1 ? i / (rs.length - 1) : 0) * W).toFixed(2) + ',' + rsY(p.value).toFixed(2)).join(' ');
+        return (React.createElement("div", { className: "bt-tearsheet", style: { ...S.cd, marginBottom: 8, padding: 12 } },
+            React.createElement("div", { style: { fontSize: 9, fontWeight: 600, color: 'var(--text-3)', textTransform: 'uppercase', letterSpacing: 1, marginBottom: 10 } }, "Informe de rendimiento"),
+            React.createElement("div", { style: { overflowX: 'auto', marginBottom: 14 } },
+                React.createElement("table", { "aria-label": "Retornos mensuales", style: { width: '100%', borderCollapse: 'separate', borderSpacing: 2, minWidth: 560 } },
+                    React.createElement("thead", null,
+                        React.createElement("tr", null,
+                            React.createElement("th", { style: { ...th, textAlign: 'left' } }, "A\u00F1o"),
+                            MONTHS_SHORT.map(m => React.createElement("th", { key: m, style: th }, m)),
+                            React.createElement("th", { style: th }, "A\u00F1o"))),
+                    React.createElement("tbody", null, ts.yearly.map(y => {
+                        const byMonth = Object.fromEntries(y.months.map(m => [m.month, m.ret]));
+                        return (React.createElement("tr", { key: y.year },
+                            React.createElement("td", { style: { ...td, textAlign: 'left', color: 'var(--text-2)' } }, y.year),
+                            MONTHS_SHORT.map((_, mi) => React.createElement("td", { key: mi, style: { ...td, borderRadius: 3, ...heatCellStyle(byMonth[mi], maxAbs) } }, byMonth[mi] == null ? '' : pct(byMonth[mi]))),
+                            React.createElement("td", { style: { ...td, fontWeight: 700, color: y.ret >= 0 ? 'var(--green)' : 'var(--red)' } }, pct(y.ret))));
+                    })))),
+            React.createElement("div", { className: "ro-stack-mobile", style: { display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: 16, marginBottom: 14 } },
+                React.createElement("div", null,
+                    React.createElement("div", { style: { fontSize: 10, fontWeight: 600, color: 'var(--text-2)', marginBottom: 4 } }, "Periodos"),
+                    React.createElement(MetricRow, { label: "Mejor semana", value: pct(ts.weekly.best), color: "var(--green)" }),
+                    React.createElement(MetricRow, { label: "Peor semana", value: pct(ts.weekly.worst), color: "var(--red)" }),
+                    React.createElement(MetricRow, { label: "Semanas positivas", value: (ts.weekly.positivePct * 100).toFixed(0) + '%', sub: ts.weekly.count + ' semanas' }),
+                    React.createElement(MetricRow, { label: "Mejor mes", value: pct(ts.months.best), color: "var(--green)" }),
+                    React.createElement(MetricRow, { label: "Peor mes", value: pct(ts.months.worst), color: "var(--red)" }),
+                    React.createElement(MetricRow, { label: "Meses positivos", value: (ts.months.positivePct * 100).toFixed(0) + '%' })),
+                React.createElement("div", null,
+                    React.createElement("div", { style: { fontSize: 10, fontWeight: 600, color: 'var(--text-2)', marginBottom: 4 } }, `Frente a ${backtest.benchSymbol || 'benchmark'}`),
+                    bench ? (React.createElement(React.Fragment, null,
+                        React.createElement(MetricRow, { label: "Beta", value: bench.beta.toFixed(2) }),
+                        React.createElement(MetricRow, { label: "Alfa anual", value: pct(bench.alpha), color: bench.alpha >= 0 ? 'var(--green)' : 'var(--red)', sub: "Jensen, semanal" }),
+                        React.createElement(MetricRow, { label: "Correlaci\u00F3n", value: bench.correlation.toFixed(2) }),
+                        React.createElement(MetricRow, { label: "Tracking error", value: (bench.trackingError * 100).toFixed(1) + '%' }),
+                        React.createElement(MetricRow, { label: "Information ratio", value: bench.informationRatio.toFixed(2), sub: bench.weeks + ' semanas emparejadas' }))) : React.createElement("div", { style: { fontSize: 11, color: 'var(--text-3)', padding: '8px 0' } }, "Sin datos suficientes del benchmark.")),
+                React.createElement("div", null,
+                    React.createElement("div", { style: { fontSize: 10, fontWeight: 600, color: 'var(--text-2)', marginBottom: 4 } },
+                        "Sharpe m\u00F3vil (",
+                        ts.rollingWindow,
+                        " semanas)"),
+                    rs.length > 1 ? (React.createElement(React.Fragment, null,
+                        React.createElement("svg", { role: "img", "aria-label": `Sharpe móvil de ${ts.rollingWindow} semanas`, viewBox: `0 0 ${W} ${H}`, preserveAspectRatio: "none", style: { width: '100%', height: 110 } },
+                            React.createElement("line", { x1: "0", x2: W, y1: rsY(0), y2: rsY(0), stroke: "var(--panel-soft-border)", strokeWidth: ".4", vectorEffect: "non-scaling-stroke" }),
+                            React.createElement("polyline", { points: rsPts, fill: "none", stroke: "var(--accent)", strokeWidth: "1.5", vectorEffect: "non-scaling-stroke" })),
+                        React.createElement("div", { style: { display: 'flex', justifyContent: 'space-between', fontSize: 10, color: 'var(--text-3)' } },
+                            React.createElement("span", null, fmtDate(rs[0].time)),
+                            React.createElement("span", null,
+                                "Actual ",
+                                rs[rs.length - 1].value.toFixed(2)),
+                            React.createElement("span", null, fmtDate(rs[rs.length - 1].time))))) : React.createElement("div", { style: { fontSize: 11, color: 'var(--text-3)', padding: '8px 0' } },
+                        "Hacen falta al menos ",
+                        ts.rollingWindow,
+                        " semanas."))),
+            React.createElement("div", { style: { fontSize: 10, fontWeight: 600, color: 'var(--text-2)', marginBottom: 4 } }, "Peores drawdowns"),
+            ts.drawdowns.length ? (React.createElement("div", { style: { overflowX: 'auto' } },
+                React.createElement("table", { "aria-label": "Peores drawdowns", style: { width: '100%', borderCollapse: 'collapse', minWidth: 480 } },
+                    React.createElement("thead", null,
+                        React.createElement("tr", null, ['Inicio', 'Mínimo', 'Recuperación', 'Caída', 'Semanas'].map(h => React.createElement("th", { key: h, style: { ...th, textAlign: h === 'Caída' || h === 'Semanas' ? 'right' : 'left', borderBottom: '1px solid var(--row-divider)' } }, h)))),
+                    React.createElement("tbody", null, ts.drawdowns.map((d, i) => (React.createElement("tr", { key: i, style: { borderBottom: '1px solid var(--row-divider)' } },
+                        React.createElement("td", { style: { ...td, textAlign: 'left' } }, fmtDate(d.start)),
+                        React.createElement("td", { style: { ...td, textAlign: 'left' } }, fmtDate(d.trough)),
+                        React.createElement("td", { style: { ...td, textAlign: 'left', color: d.recovered ? 'var(--text-1)' : 'var(--amber)' } }, d.recovered ? fmtDate(d.end) : 'Sin recuperar'),
+                        React.createElement("td", { style: { ...td, color: 'var(--red)', fontWeight: 600 } },
+                            "-",
+                            (d.depth * 100).toFixed(1),
+                            "%"),
+                        React.createElement("td", { style: td }, d.weeks)))))))) : React.createElement("div", { style: { fontSize: 11, color: 'var(--text-3)' } }, "Sin drawdowns en el periodo.")));
+    }
     function renderTradesTable(backtest, setSelectedChart, S) {
         var _a;
         return ((_a = backtest.allTrades) === null || _a === void 0 ? void 0 : _a.length) ? React.createElement(BacktestTradesTable, { backtest: backtest, setSelectedChart: setSelectedChart, S: S }) : null;
@@ -1475,7 +1571,7 @@ window.StockScannerTabs = window.StockScannerTabs || {};
         return React.createElement(TickerIssuesPanel, { backtest: backtest, S: ctx.S });
     }
     function BacktestWorkspace({ ctx }) {
-        var _a;
+        var _a, _b, _c;
         const [view, setView] = React.useState('overview');
         const [configOpen, setConfigOpen] = React.useState(!ctx.backtest);
         React.useEffect(() => { if (ctx.backtest) {
@@ -1510,9 +1606,11 @@ window.StockScannerTabs = window.StockScannerTabs || {};
                     renderBacktestPerformance(backtest, ctx),
                     renderWeeklyLog(backtest, btCapital, S)),
                 view === 'overview' && renderBtCharts(backtest, ctx),
-                view === 'analysis' && React.createElement(StrategyAnalysis, { backtest: backtest, S: S }),
+                view === 'analysis' && React.createElement(React.Fragment, null,
+                    React.createElement(StrategyAnalysis, { backtest: backtest, S: S }),
+                    React.createElement(PerformanceReport, { backtest: backtest, S: S, riskFreePct: (_b = (_a = backtest.riskFreePct) !== null && _a !== void 0 ? _a : ctx.pfRiskFree) !== null && _b !== void 0 ? _b : 0 })),
                 view === 'trades' && renderTradesTable(backtest, setSelectedChart, S),
-                view === 'trades' && ((_a = backtest.allTrades) === null || _a === void 0 ? void 0 : _a.length) > 0 && (React.createElement("div", { style: { marginBottom: 8 } },
+                view === 'trades' && ((_c = backtest.allTrades) === null || _c === void 0 ? void 0 : _c.length) > 0 && (React.createElement("div", { style: { marginBottom: 8 } },
                     React.createElement("button", { onClick: () => {
                             const hdr = ["Ticker", "Direccion", "F.Entrada", "F.Salida", "P.Entrada", "P.Salida", "Ret%", "PnL$", "Comision$", "Duracion(w)", "Razon Entrada", "Razon Salida"];
                             const rows = [hdr.join(",")];

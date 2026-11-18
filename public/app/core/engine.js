@@ -9,8 +9,11 @@
     const oldestFirst=[...candles].reverse();
     const grouped=[];
     let dayKey=null,buffer=[];
+    // Agrupa por sesión (día UTC) en bloques de `factor` barras alineados al inicio de la sesión.
+    // El último bloque de la sesión puede ser parcial (p. ej. 7 barras 1H → 4H + 3H), como hacen
+    // las plataformas habituales; así no se pierden barras ni sus máximos/mínimos.
     const flushBuffer=()=>{
-      for(let i=0;i+factor<=buffer.length;i+=factor){
+      for(let i=0;i<buffer.length;i+=factor){
         const chunk=buffer.slice(i,i+factor);
         grouped.push({time:chunk[chunk.length-1].time,open:chunk[0].open,high:Math.max(...chunk.map(x=>x.high)),low:Math.min(...chunk.map(x=>x.low)),close:chunk[chunk.length-1].close,volume:chunk.reduce((a,x)=>a+(x.volume||0),0)});
       }
@@ -203,5 +206,53 @@
   }
   function std(arr){if(!arr||arr.length<2)return 0;const m=avg(arr);return Math.sqrt(arr.reduce((a,x)=>a+(x-m)**2,0)/(arr.length-1))}
   function clamp(x,min,max){return Math.max(min,Math.min(max,x))}
-  window.StockScannerCore = Object.assign(window.StockScannerCore||{}, { aggregateCandles, findClosedIndexAtOrBeforeTime, buildSignalSliceFromIndex, buildAlignedSignalSlice, buildAlignedSignalMap, evalInd, testFilter, evalRuleGroups, evalRuleGroupsDetailed, testFilterAligned, evalRuleGroupsDetailedAligned, fetchTicker, calcVolatility, calcSignalScore, avg:(arr)=>avg(arr)||0, std, clamp });
+
+  // Pesos proporcionales a `raw` con cada |peso| dentro de [minW, maxW].
+  // Busca lambda tal que sum(clamp(lambda*base_i, minW, maxW)) = 1, así el exceso de una
+  // posición topada se reparte entre las que aún tienen capacidad sin volver a romper el máximo.
+  // Si n*maxW < 1 no se puede invertir todo: cada posición queda en maxW y el resto es efectivo.
+  function boundWeights(raw, minAbs, maxAbs){
+    const n = Array.isArray(raw) ? raw.length : 0;
+    if(!n) return [];
+    const signs = raw.map(w => Number(w) < 0 ? -1 : 1);
+    let maxW = Number(maxAbs); if(!(maxW > 0)) maxW = 1; maxW = Math.min(1, maxW);
+    let minW = Math.max(0, Number(minAbs) || 0);
+    minW = Math.min(minW, maxW, 1/n);
+    if(n * maxW <= 1 + 1e-12) return signs.map(s => s * maxW);
+    const abs = raw.map(w => Math.abs(Number(w)) || 0);
+    const total = abs.reduce((a,b)=>a+b,0);
+    const base = total > 0 ? abs.map(v => Math.max(v/total, 1e-12)) : abs.map(() => 1/n);
+    // S(lambda) es lineal a trozos y no decreciente: se ordenan los puntos de quiebre
+    // (minW/b, maxW/b), se localiza el tramo donde S cruza 1 y se interpola. Coste O(n log n).
+    const sumAt = lambda => { let s=0; for(let i=0;i<n;i++){ const x=lambda*base[i]; s+=x<minW?minW:(x>maxW?maxW:x); } return s; };
+    const pts = [];
+    for(let i=0;i<n;i++) pts.push(minW/base[i], maxW/base[i]);
+    pts.sort((a,b)=>a-b);
+    let lambda;
+    if(sumAt(pts[0]) >= 1) lambda = pts[0];
+    else {
+      let lo = 0, hi = pts.length-1; // S(pts[lo]) < 1 <= S(pts[hi])
+      while(hi-lo > 1){ const mid=(lo+hi)>>1; if(sumAt(pts[mid]) < 1) lo=mid; else hi=mid; }
+      const sLo = sumAt(pts[lo]), sHi = sumAt(pts[hi]);
+      lambda = sHi > sLo ? pts[lo] + (1-sLo)*(pts[hi]-pts[lo])/(sHi-sLo) : pts[hi];
+    }
+    const w = base.map(b => Math.min(maxW, Math.max(minW, lambda*b)));
+    const s = w.reduce((a,b)=>a+b,0) || 1;
+    // Corrección numérica mínima sin superar el máximo.
+    return w.map((x,i) => signs[i] * Math.min(maxW, x/s));
+  }
+
+  // Generador pseudoaleatorio reproducible (mulberry32). Una misma semilla da la misma secuencia.
+  function seededRandom(seed){
+    let a = (Number(seed) >>> 0) || 0x9e3779b9;
+    return function(){
+      a = (a + 0x6D2B79F5) >>> 0;
+      let t = a;
+      t = Math.imul(t ^ (t >>> 15), t | 1);
+      t ^= t + Math.imul(t ^ (t >>> 7), t | 61);
+      return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
+    };
+  }
+
+  window.StockScannerCore = Object.assign(window.StockScannerCore||{}, { aggregateCandles, findClosedIndexAtOrBeforeTime, buildSignalSliceFromIndex, buildAlignedSignalSlice, buildAlignedSignalMap, evalInd, testFilter, evalRuleGroups, evalRuleGroupsDetailed, testFilterAligned, evalRuleGroupsDetailedAligned, fetchTicker, calcVolatility, calcSignalScore, avg:(arr)=>avg(arr)||0, std, clamp, boundWeights, seededRandom });
 })();

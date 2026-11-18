@@ -27,6 +27,7 @@
     ['StockScannerCore.runScanWorkflow',        window.StockScannerCore?.runScanWorkflow],
     ['StockScannerCore.runBacktestWorkflow',    window.StockScannerCore?.runBacktestWorkflow],
     ['StockScannerCore.buildPortfolioWorkflow', window.StockScannerCore?.buildPortfolioWorkflow],
+    ['StockScannerCore.computeTearsheet',       window.StockScannerCore?.computeTearsheet],
 
     // Layer 4 — State (defaults.js must precede state hooks)
     ['StockScannerState.newFilter',              window.StockScannerState?.newFilter],

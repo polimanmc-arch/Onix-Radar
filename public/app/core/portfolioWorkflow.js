@@ -3,56 +3,32 @@
   const { fetchTicker, avg, std } = window.StockScannerCore;
 
 
-  function applyWeightBounds(signedWeights, minAbs, maxAbs){
-    const n = Array.isArray(signedWeights) ? signedWeights.length : 0;
-    if(!n) return [];
-    const signs = signedWeights.map(w => w < 0 ? -1 : 1);
-    const original = signedWeights.map(w => Math.abs(Number(w)||0));
-    const total = original.reduce((a,b)=>a+b,0);
-    const base = total > 0 ? original.map(v => v/total) : Array.from({length:n}, ()=>1/n);
+  // Límites de peso compartidos con el backtest (ver engine.js → boundWeights).
+  const applyWeightBounds = (weights, minAbs, maxAbs) => window.StockScannerCore.boundWeights(weights, minAbs, maxAbs);
 
-    let minW = Math.max(0, Number(minAbs)||0);
-    let maxW = Math.max(0, Number(maxAbs)||0);
-    if(maxW <= 0) maxW = 1;
-    minW = Math.min(minW, maxW, 1/n);
-    if(minW * n > 1 || maxW * n < 1){
-      return Array.from({length:n}, (_,i)=>signs[i] * (1/n));
+  // Clave de periodo para cruzar retornos de distintos símbolos por fecha y no por posición.
+  // Se desplaza 12 h para que barras fechadas a medianoche local (Europa/Asia) caigan en su día.
+  function periodKey(t, tf){
+    if(t==null) return null;
+    if(tf==='4h') return String(t);
+    const d=new Date((Number(t)+43200)*1000);
+    const y=d.getUTCFullYear(), m=d.getUTCMonth()+1, day=d.getUTCDate();
+    if(tf==='1mo') return y+'-'+m;
+    if(tf==='1wk'){
+      const dt=new Date(Date.UTC(y,m-1,day));
+      const dow=dt.getUTCDay()||7;
+      dt.setUTCDate(dt.getUTCDate()+4-dow);
+      const yStart=Date.UTC(dt.getUTCFullYear(),0,1);
+      return dt.getUTCFullYear()+'-W'+Math.ceil(((dt-yStart)/86400000+1)/7);
     }
-
-    const weights = Array(n).fill(null);
-    let free = new Set(Array.from({length:n}, (_,i)=>i));
-    let changed = true;
-    let guard = 0;
-    while(changed && guard < 20){
-      guard += 1;
-      changed = false;
-      const fixedSum = weights.reduce((a,v)=>a+(v==null?0:v),0);
-      const remaining = 1 - fixedSum;
-      if(remaining <= 0) break;
-      const freeIdx = Array.from(free);
-      const freeBaseSum = freeIdx.reduce((a,i)=>a+base[i],0) || freeIdx.length;
-      for(const i of freeIdx){
-        const provisional = remaining * ((base[i] || 1/freeIdx.length) / freeBaseSum);
-        if(provisional < minW - 1e-9){ weights[i] = minW; free.delete(i); changed = true; }
-        else if(provisional > maxW + 1e-9){ weights[i] = maxW; free.delete(i); changed = true; }
-      }
-    }
-      const fixedSum = weights.reduce((a,v)=>a+(v==null?0:v),0);
-      const remaining = Math.max(0, 1 - fixedSum);
-      const freeIdx = Array.from(free);
-      const freeBaseSum = freeIdx.reduce((a,i)=>a+base[i],0) || freeIdx.length;
-      for(const i of freeIdx){
-        weights[i] = remaining * ((base[i] || 1/freeIdx.length) / freeBaseSum);
-      }
-    const finalSum = weights.reduce((a,b)=>a+b,0) || 1;
-    return weights.map((w,i)=>signs[i]*(w/finalSum));
+    return y+'-'+m+'-'+day;
   }
 
   async function buildPortfolioWorkflow(opts){
     const {
       results, filters, shortFilters,
       pfCapital, pfMinWeight, pfMaxWeight, pfMaxPos, pfRiskFree, pfCorFilter, pfCorThresh,
-      pfMode, pfSims, pfStopType, pfStopATRMult, pfStopATRPeriod, pfStopPctVal,
+      pfMode, pfSims, pfSeed, pfStopType, pfStopATRMult, pfStopATRPeriod, pfStopPctVal,
       sectorData, scanDirection, pfUniverseSource, pfManualTickers,
       fetchSectors, dataCacheRef, setPfBuilding, setTab, setPortfolio,
     } = opts;
@@ -71,6 +47,9 @@
     const stopATRMult = finiteNum(pfStopATRMult, 2, 0.5, 5);
     const stopPctVal = finiteNum(pfStopPctVal, 8, 1, 50);
     const atrPeriod = Math.round(finiteNum(pfStopATRPeriod, 14, 1, 200));
+    // Semilla del muestreo: misma configuración + misma semilla = mismo portafolio.
+    const seed = Math.round(finiteNum(pfSeed, 42, 0, 2147483647));
+    const random = window.StockScannerCore.seededRandom(seed);
 
     const parsePortfolioManualTickers = window.StockScannerPortfolioIO?.parsePortfolioManualTickers || (()=>[]);
     const manualEntries=parsePortfolioManualTickers(pfManualTickers);
@@ -116,8 +95,9 @@
         const closes=cached.closes.slice(1), highs=cached.highs.slice(1), lows=cached.lows.slice(1);
         // timePath: oldest-to-newest timestamps aligned with pricePath
         const timePath=[...(cached.times||[]).slice(1)].reverse();
-        const rawRets=[];
-        for(let i=0;i<Math.min(closes.length-1,100);i++) if(closes[i+1]>0) rawRets.push((closes[i]-closes[i+1])/closes[i+1]);
+        const barTimes=(cached.times||[]).slice(1);
+        const rawRets=[], retKeys=[];
+        for(let i=0;i<Math.min(closes.length-1,100);i++) if(closes[i+1]>0){ rawRets.push((closes[i]-closes[i+1])/closes[i+1]); retKeys.push(periodKey(barTimes[i],mainTf)); }
         if(rawRets.length<20) continue;
         let side;
         if(pfUniverseSource==='manual'){
@@ -145,26 +125,48 @@
         const riskPerSharePct=closes[0]*(stopPctVal/100);
         const sector=sectorSnapshot[r.ticker]?.sector||'Other';
         const industry=sectorSnapshot[r.ticker]?.industry||'';
-        stockData.push({ticker:r.ticker,name:cached.name||r.name,price:r.price||closes[0],side,sign:side==='short'?-1:1,rawRets,signedRets,annRetRaw,annRet:signedAnnRet,annVol,sharpe,atr,stopLoss:side==='short'?(atr?closes[0]+stopATRMult*atr:null):stopLoss,riskPerShare,riskPerSharePct,stopLossPct:side==='short'?closes[0]*(1+stopPctVal/100):stopLossPct,sector,industry,closes:[...closes],pricePath:[...closes].reverse(),timePath});
+        stockData.push({ticker:r.ticker,name:cached.name||r.name,price:r.price||closes[0],side,sign:side==='short'?-1:1,rawRets,signedRets,retKeys,annRetRaw,annRet:signedAnnRet,annVol,sharpe,atr,stopLoss:side==='short'?(atr?closes[0]+stopATRMult*atr:null):stopLoss,riskPerShare,riskPerSharePct,stopLossPct:side==='short'?closes[0]*(1+stopPctVal/100):stopLossPct,sector,industry,closes:[...closes],pricePath:[...closes].reverse(),timePath});
       }
       if(stockData.length<2){ return { ok:false, message:'No hubo suficientes acciones con datos históricos suficientes para optimizar.' }; }
 
       const n=stockData.length;
-      const minLen=Math.min(...stockData.map(s=>s.rawRets.length));
-      const centeredReturns=stockData.map(s=>{
-        const rets=s.signedRets.slice(0,minLen), mean=avg(rets);
-        const centered=rets.map(r=>r-mean);
-        return {centered,variance:centered.reduce((sum,r)=>sum+r*r,0)};
+      // Retornos alineados por periodo. Si dos símbolos tienen exactamente las mismas fechas se usa
+      // el camino rápido por índice; si no, se cruzan sólo los periodos comunes.
+      const keySignatures=new Map();
+      const alignInfo=stockData.map(s=>{
+        const sig=s.retKeys.join('|');
+        if(!keySignatures.has(sig)) keySignatures.set(sig,keySignatures.size);
+        return {sigId:keySignatures.get(sig),index:new Map(s.retKeys.map((k,i)=>[k,i]))};
       });
+      const MIN_COMMON=10;
+      const commonPairs=(i,j)=>{
+        const a=stockData[i], ai=alignInfo[i], bi=alignInfo[j];
+        if(ai.sigId===bi.sigId) return null; // mismas fechas: alineación directa
+        const ia=[], ib=[];
+        a.retKeys.forEach((k,idx)=>{ const jdx=bi.index.get(k); if(jdx!=null){ ia.push(idx); ib.push(jdx); } });
+        return {ia,ib};
+      };
+      // Covarianza muestral entre dos series ya emparejadas.
+      const pairCov=(xs,ys,len,getX,getY)=>{
+        if(len<2) return {cov:0,vx:0,vy:0,len};
+        let mx=0,my=0; for(let k=0;k<len;k++){ mx+=getX(k); my+=getY(k); } mx/=len; my/=len;
+        let cov=0,vx=0,vy=0;
+        for(let k=0;k<len;k++){ const dx=getX(k)-mx, dy=getY(k)-my; cov+=dx*dy; vx+=dx*dx; vy+=dy*dy; }
+        return {cov,vx,vy,len};
+      };
+      const pairStats=(i,j,field)=>{
+        const xs=stockData[i][field], ys=stockData[j][field];
+        const cp=commonPairs(i,j);
+        if(!cp){ const len=Math.min(xs.length,ys.length); return pairCov(xs,ys,len,k=>xs[k],k=>ys[k]); }
+        return pairCov(xs,ys,cp.ia.length,k=>xs[cp.ia[k]],k=>ys[cp.ib[k]]);
+      };
       // Evaluate only pairs actually needed by selection or the final matrix.
       // Avoid an N x N allocation for a universe that becomes <= 50 positions.
       const correlationFor=(i,j)=>{
           if(i===j) return 1;
-          const {centered:ri,variance:vi}=centeredReturns[i];
-          const {centered:rj,variance:vj}=centeredReturns[j];
-          let cov=0;
-          for(let k=0;k<minLen;k++) cov+=ri[k]*rj[k];
-          return vi>0&&vj>0?cov/Math.sqrt(vi*vj):0;
+          const {cov,vx,vy,len}=pairStats(i,j,'signedRets');
+          if(len<MIN_COMMON) return 0;
+          return vx>0&&vy>0?cov/Math.sqrt(vx*vy):0;
       };
 
       let included=stockData.map((_,i)=>i);
@@ -190,18 +192,16 @@
         row: sel.map((o,j) => correlationFor(included[i],included[j])),
       }));
 
-      const retLen=Math.min(...sel.map(s=>s.rawRets.length));
-      if(!Number.isFinite(retLen) || retLen < 2){
-        return { ok:false, message:'No hubo suficientes retornos históricos alineados para construir el portafolio.' };
-      }
       const covMat=Array.from({length:m},()=>Array(m).fill(0));
       for(let i=0;i<m;i++){
         for(let j=i;j<m;j++){
-          const ri=sel[i].rawRets.slice(0,retLen), rj=sel[j].rawRets.slice(0,retLen);
-          const mi=avg(ri), mj=avg(rj);
-          let cov=0; for(let k=0;k<retLen;k++) cov+=(ri[k]-mi)*(rj[k]-mj);
-          cov=cov/(retLen-1)*ppy; covMat[i][j]=cov; covMat[j][i]=cov;
+          const {cov,len}=i===j?pairStats(included[i],included[i],'rawRets'):pairStats(included[i],included[j],'rawRets');
+          const c=len>=MIN_COMMON?cov/(len-1)*ppy:0;
+          covMat[i][j]=c; covMat[j][i]=c;
         }
+      }
+      if(covMat.some((row,i)=>!(row[i]>0))){
+        return { ok:false, message:'No hubo suficientes retornos históricos alineados para construir el portafolio.' };
       }
 
       const rf=riskFreePct/100; const maxW=maxWeightPct/100; const minW=Math.max(0, minWeightPct/100);
@@ -216,25 +216,12 @@
       // weight vectors and evaluates their historical return/vol using the
       // covariance matrix. The best Sharpe, min-vol and max-ret portfolios
       // are all tracked so the UI can offer multiple optimization modes.
+      // Pesos aleatorios con la semilla del usuario y los mismos límites [minW, maxW] que el
+      // resultado final, para que todos los candidatos del muestreo sean válidos.
       const drawWeights=()=>{
         if(!m) return [];
-        const raw=sel.map(()=>Math.random());
-        let sum=raw.reduce((a,b)=>a+b,0)||1;
-        let w=raw.map((x,i)=>(x/sum)*Math.min(1,m*capPerName)*(sel[i].sign<0?-1:1));
-        for(let iter=0;iter<10;iter++){
-          let capped=false; let absSum=0;
-          for(let i=0;i<w.length;i++){
-            const sign=w[i]<0?-1:1;
-            const abs=Math.abs(w[i]);
-            if(abs>capPerName){ w[i]=sign*capPerName; capped=true; }
-            absSum+=Math.abs(w[i]);
-          }
-          if(absSum<=0) break;
-          const scale=Math.min(1,1/absSum);
-          w=w.map(x=>x*scale);
-          if(!capped) break;
-        }
-        return w;
+        const raw=sel.map(s=>random()*(s.sign<0?-1:1));
+        return applyWeightBounds(raw,minW,capPerName);
       };
 
       // Equal-weight mode skips sampling entirely for the "chosen" portfolio,
@@ -400,7 +387,7 @@
         cash:finalPt.cash,endingEquity:finalPt.value,
         mode:pfMode,capital,altSharpe:bestSharpe,altMinVol:bestMinVol,
         source:pfUniverseSource,manualInputCount:manualEntries.length,
-        simsRequested:sims, simsUsed:effectiveSims, scanDirection
+        simsRequested:sims, simsUsed:effectiveSims, seed, scanDirection
       });
       setTab('portfolio');
       return { ok:true };

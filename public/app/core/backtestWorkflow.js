@@ -1,5 +1,5 @@
 ﻿(function(){
-  const { fetchTicker, aggregateCandles } = window.StockScannerCore;
+  const { fetchTicker, aggregateCandles, boundWeights } = window.StockScannerCore;
 
   async function runBacktestWorkflow(opts){
     const {
@@ -749,28 +749,44 @@
         }
         return {matched:false,groupIdx:0,conditions:[]};
       };
-      const findAlignedIndexFast=(d,anchorTime,startIdx=1)=>{
+      // Instante en que una barra queda cerrada (times = inicio de barra, en segundos).
+      // Mensual: inicio del mes siguiente (calendario); resto: inicio + duración nominal.
+      const TF_SECONDS={'4h':4*3600,'1d':86400,'1wk':7*86400};
+      const barCloseTime=(tf,start)=>{
+        if(start==null) return null;
+        if(tf==='1mo'){
+          const d=new Date((start+43200)*1000); // +12 h: medianoche local europea/asiática cae en su mes
+          return Math.floor(Date.UTC(d.getUTCFullYear(),d.getUTCMonth()+1,1)/1000);
+        }
+        return start+(TF_SECONDS[tf]||86400);
+      };
+      // Índice (más reciente primero) de la última barra de `tf` ya cerrada en `decisionTime`.
+      // Evita usar el cierre de una vela que todavía está formándose (sesgo de futuro).
+      const findClosedIndexAt=(d,tf,decisionTime)=>{
         const times=d?.times;
-        if(!times||anchorTime==null) return -1;
-        let lo=Math.max(0,startIdx), hi=times.length-1, ans=-1;
+        if(!times?.length||decisionTime==null) return -1;
+        let lo=0, hi=times.length-1, ans=-1;
         while(lo<=hi){
           const mid=(lo+hi)>>1;
-          if(times[mid]<=anchorTime){ ans=mid; hi=mid-1; }
+          if(barCloseTime(tf,times[mid])<=decisionTime){ ans=mid; hi=mid-1; }
           else lo=mid+1;
         }
         return ans;
       };
+      // La señal semanal se decide al cierre de la semana `signalIndex`.
+      const signalDecisionTime=(times,signalIndex)=>barCloseTime(mainTf,times?.[signalIndex]);
+
       let weekAlignedCache = null;
       let maxWeekAlignedCacheSize = 0;
       const getAlignedIndexMap = (ticker, signalIndex) => {
         const key = ticker + '|' + signalIndex;
         if(weekAlignedCache?.has(key)) return weekAlignedCache.get(key);
         const dataByTf = allStockData[ticker];
-        const anchorTime = dataByTf?.[mainTf]?.times?.[signalIndex];
+        const decisionTime = signalDecisionTime(dataByTf?.[mainTf]?.times, signalIndex);
         const aligned = {};
         Object.entries(dataByTf||{}).forEach(([tf,d])=>{
           if(tf==='_meta') return;
-          aligned[tf] = tf===mainTf ? signalIndex : findAlignedIndexFast(d, anchorTime, signalIndex);
+          aligned[tf] = tf===mainTf ? signalIndex : findClosedIndexAt(d, tf, decisionTime);
         });
         if(weekAlignedCache){
           weekAlignedCache.set(key, aligned);
@@ -873,29 +889,32 @@
         if(!mktFilterEnabled) return true;
         const regimeRules=(mktFilterRules&&mktFilterRules.length)?mktFilterRules:[];
         if(!regimeRules.length || !mktDataByTf || !Object.keys(mktDataByTf).length) return true;
-        const ts=ts0?.[signalIndex];
-        if(!ts) return true;
+        const decisionTime=signalDecisionTime(ts0,signalIndex);
+        if(!decisionTime) return true;
         const idxByTf={};
-        Object.entries(mktDataByTf||{}).forEach(([tf,d])=>{ if(tf!=='_meta') idxByTf[tf]=findAlignedIndexFast(d,ts,signalIndex); });
+        Object.entries(mktDataByTf||{}).forEach(([tf,d])=>{ if(tf!=='_meta') idxByTf[tf]=findClosedIndexAt(d,tf,decisionTime); });
         const res=evalRuleGroupsDetailedFast(regimeRules,mktDataByTf,idxByTf);
         return !!res.matched;
       };
 
-      // Score a signal by its recent risk-adjusted momentum at the signal bar.
-      // Uses the 12 closes immediately following signalIndex (oldest history at that point).
-      // For longs: higher Sharpe = better. For shorts: inverted returns, same logic.
-      const scoreSignal=(ticker,dir,sigIdx)=>{
+      // Estadísticas de las 12 semanas cerradas hasta la barra de señal (sin datos futuros).
+      // score: Sharpe semanal en la dirección de la operación (para shorts se invierten retornos).
+      // vol: desviación típica semanal (usada por Min Varianza como peso inverso a la volatilidad).
+      // momentum: retorno medio semanal en la dirección de la operación (usado por Max Return).
+      const signalStats12=(ticker,dir,sigIdx)=>{
+        const empty={score:0,vol:null,momentum:0};
         const closes=allStockData[ticker]?.[mainTf]?.closes;
-        if(!closes) return 0;
+        if(!closes) return empty;
         const end=Math.min(sigIdx+13,closes.length-1);
-        if(end-sigIdx<4) return 0;
+        if(end-sigIdx<4) return empty;
         const rets=[];
         for(let i=sigIdx;i<end;i++) if(closes[i+1]>0) rets.push((closes[i]-closes[i+1])/closes[i+1]);
-        if(rets.length<4) return 0;
+        if(rets.length<4) return empty;
+        const sign=dir==='short'?-1:1;
         const mean=rets.reduce((a,b)=>a+b,0)/rets.length;
         const vol=Math.sqrt(rets.reduce((a,r)=>a+(r-mean)**2,0)/(rets.length-1));
         const sharpe=vol>0?mean/vol:(mean>0?1:-1);
-        return dir==='short'?-sharpe:sharpe;
+        return {score:sign*sharpe,vol,momentum:sign*mean};
       };
 
       const calcAtrStop=(d,h,signalIndex)=>{
@@ -974,22 +993,22 @@
         return prefix+' G'+(res?.groupIdx||1)+': '+conditions.join(' & ');
       };
 
+      // Reglas de peso por señal (heurísticas sobre 12 semanas; no usan la matriz de covarianza):
+      //  equal/equalweight → iguales · maxsharpe → proporcional al Sharpe (>0)
+      //  minvol → inverso de la volatilidad · maxret → proporcional al retorno medio (>0)
+      // Todos respetan [minWeight, maxWeight]; si no cabe el 100% queda efectivo.
       const buildTargetWeights=(signals)=>{
         const n=signals.length;
         if(!n) return [];
         const allocMode = btAllocationMode === 'portfolio' ? (pfMode || 'maxsharpe') : (btAllocationMode || 'equal');
-        if(allocMode==='equal') return Array.from({length:n},()=>1/n);
+        const floor=1e-6;
         const raw=signals.map(s=>{
-          const absScore=Math.max(0.01, Math.abs(Number(s.score)||0.01));
-          if(allocMode==='minvol') return 1/absScore;
-          if(allocMode==='maxret') return Math.max(0.01, Number(s.momentum)||absScore);
-          return absScore;
+          if(allocMode==='equal'||allocMode==='equalweight') return 1;
+          if(allocMode==='minvol') return 1/Math.max(1e-4, Number(s.vol)||0);
+          if(allocMode==='maxret') return Math.max(floor, Number(s.momentum)||0);
+          return Math.max(floor, Number(s.score)||0);
         });
-        const sum=raw.reduce((a,b)=>a+b,0)||1;
-        let weights=raw.map(v=>v/sum);
-        weights=weights.map(w=>Math.max(minWeight, Math.min(maxWeight, w)));
-        const adjSum=weights.reduce((a,b)=>a+b,0)||1;
-        return weights.map(w=>w/adjSum);
+        return boundWeights(raw, minWeight, maxWeight);
       };
       const selectTopSignals=(signals,k)=>{
         if(k<=0||!signals.length) return [];
@@ -1112,7 +1131,8 @@
             const totalCost=entryCommission+exitCommission;
             const netPnl=h.shares*grossPnlPerShare-totalCost;
             const netReturnPct=(netPnl/(h.shares*h.entryPrice))*100;
-            totalCommissionPaid+=totalCost;
+            // La comisión de entrada ya se sumó al abrir la posición.
+            totalCommissionPaid+=exitCommission;
             allTrades.push({ticker,name:d.name||ticker,dir:h.dir,entryPrice:h.entryPrice,exitPrice:execPrice,shares:h.shares,entrySignalIndex:h.entrySignalIndex,entryExecIndex:h.entryExecIndex,exitSignalIndex:executionIndex+1,exitExecIndex:executionIndex,entryWeek:h.entryExecIndex,exitWeek:executionIndex,entryTime:d.times?.[h.entryExecIndex]||0,exitTime:signalExitTime||d.times?.[executionIndex]||0,returnPct:netReturnPct,pnl:netPnl,commission:totalCost,duration:h.entryExecIndex-executionIndex,reason,entryReason:h.entryReason||'',stopSeries:h.stopSeries||[],slippagePct:btSlippage||0});
             // Deduct exit commission from cash proceeds
             cashBalance += isShort?(h.shares*h.entryPrice+h.shares*grossPnlPerShare-exitCommission):(h.shares*execPrice-exitCommission);
@@ -1127,8 +1147,8 @@
         const newSignalCount=entrySignals.length+shortSignals.length;
         let selectedSignals=[];
         if(slotsAvail>0&&newSignalCount>0){
-          for(const s of entrySignals){ s.score=scoreSignal(s.ticker,'long',s.signalIndex); s.momentum=s.score; }
-          for(const s of shortSignals){ s.score=scoreSignal(s.ticker,'short',s.signalIndex); s.momentum=Math.abs(s.score); }
+          for(const s of entrySignals) Object.assign(s,signalStats12(s.ticker,'long',s.signalIndex));
+          for(const s of shortSignals) Object.assign(s,signalStats12(s.ticker,'short',s.signalIndex));
           selectedSignals=selectTopSignals([...entrySignals,...shortSignals],Math.min(newSignalCount,slotsAvail));
         }
         if(slotsAvail>0&&selectedSignals.length>0){
@@ -1142,6 +1162,9 @@
             }
           }
           const targetWeights=buildTargetWeights(selectedSignals);
+          // Los pesos reparten el efectivo disponible (no el valor total, que ya incluye posiciones
+          // abiertas) y cada posición nueva queda limitada a maxWeight del valor de la cartera.
+          const investableCash=cashBalance;
           for(let bi=0;bi<selectedSignals.length;bi++){
             const {ticker:t,dir,entryMatch,signalIndex:entrySignalIndex,executionIndex:entryExecIndex}=selectedSignals[bi];
             const d=allStockData[t]?.[mainTf];
@@ -1149,7 +1172,7 @@
             const rawEntryPrice=barPrice(d,entryExecIndex,'open');
             const execPrice=applySlippage(rawEntryPrice,dir,'entry'); if(execPrice==null||execPrice<=0) continue;
             const weightedAllocation = ['portfolio','maxsharpe','minvol','maxret'].includes(btAllocationMode||'');
-            const targetAmount=weightedAllocation ? portValue*targetWeights[bi] : portValue/pfMaxPos;
+            const targetAmount=weightedAllocation ? Math.min(investableCash*targetWeights[bi], portValue*maxWeight) : portValue/pfMaxPos;
             const shares=Math.floor(Math.min(targetAmount,cashBalance)/execPrice);
             if(shares>0){
               const entryCommission=commRate*shares*execPrice;
@@ -1182,9 +1205,13 @@
 
       const startVal=btCapital; const endVal=equityCurve.length?equityCurve[equityCurve.length-1].value:startVal;
       const totalReturn=(endVal-startVal)/startVal;
-      let peak2=0,maxDD2=0; equityCurve.forEach(p=>{ if(p.value>peak2) peak2=p.value; const dd=(peak2-p.value)/peak2; if(dd>maxDD2) maxDD2=dd; });
-      const years=btWeeks/52; const annReturn=years>0?Math.pow(Math.max(0,1+totalReturn),1/years)-1:totalReturn;
-      const weeklyRets=[]; for(let i=1;i<equityCurve.length;i++) weeklyRets.push((equityCurve[i].value-equityCurve[i-1].value)/equityCurve[i-1].value);
+      // La serie de valor arranca en el capital inicial: el drawdown cuenta pérdidas desde el inicio
+      // y el primer retorno semanal también entra en volatilidad/Sharpe/Sortino.
+      const valuePath=[startVal,...equityCurve.map(p=>p.value)];
+      let peak2=startVal,maxDD2=0; valuePath.forEach(v=>{ if(v>peak2) peak2=v; const dd=peak2>0?(peak2-v)/peak2:0; if(dd>maxDD2) maxDD2=dd; });
+      // Años efectivamente simulados (una entrada de la curva por semana).
+      const years=(equityCurve.length||btWeeks)/52; const annReturn=years>0?Math.pow(Math.max(0,1+totalReturn),1/years)-1:totalReturn;
+      const weeklyRets=[]; for(let i=1;i<valuePath.length;i++) if(valuePath[i-1]>0) weeklyRets.push((valuePath[i]-valuePath[i-1])/valuePath[i-1]);
       const avgWR=weeklyRets.length?weeklyRets.reduce((a,b)=>a+b,0)/weeklyRets.length:0;
       const wStd=weeklyRets.length>1?Math.sqrt(weeklyRets.reduce((a,r)=>a+(r-avgWR)**2,0)/(weeklyRets.length-1)):0;
       const annVol=wStd*Math.sqrt(52); const sharpe=annVol>0?(annReturn-pfRiskFree/100)/annVol:0;
@@ -1195,8 +1222,9 @@
       const avgLoss=losses.length?losses.reduce((a,t)=>a+t.returnPct,0)/losses.length:0;
       const grossProfit=wins.reduce((a,t)=>a+t.pnl,0); const grossLoss=Math.abs(losses.reduce((a,t)=>a+t.pnl,0));
       const profitFactor=grossLoss>0?grossProfit/grossLoss:grossProfit>0?Infinity:0;
+      // Desviación a la baja estándar: semanas positivas cuentan como 0, se divide entre todas las semanas.
       const downRets=weeklyRets.filter(r=>r<0);
-      const downDev=downRets.length>1?Math.sqrt(downRets.reduce((a,r)=>a+r*r,0)/downRets.length)*Math.sqrt(52):0;
+      const downDev=downRets.length>1&&weeklyRets.length?Math.sqrt(downRets.reduce((a,r)=>a+r*r,0)/weeklyRets.length)*Math.sqrt(52):0;
       const sortino=downDev>0?(annReturn-pfRiskFree/100)/downDev:0;
       const calmar=maxDD2>0?annReturn/maxDD2:0;
       const avgDuration=validTrades.length?validTrades.reduce((a,t)=>a+t.duration,0)/validTrades.length:0;
@@ -1264,7 +1292,7 @@
         simulationMs:Math.max(0,(perfMarks.simulationMs||totalMs)-(perfMarks.regimeMs||perfMarks.benchmarkMs||perfMarks.dataMs||0)),
         resultsMs:Math.max(0,totalMs-(perfMarks.simulationMs||totalMs)),
       };
-      const result={equityCurve,weeklyLog,startVal,endVal,totalReturn,annReturn,annVol,sharpe,maxDrawdown:maxDD2,trades:tradeCount,allTrades:compactTrades,weeks:btWeeks,capital:btCapital,winRate,avgWin,avgLoss,profitFactor,sortino,calmar,avgDuration,benchCurve,benchReturn,benchSymbol:btBenchmark,totalCommissionPaid,commission:btCommission||0,slippage:btSlippage||0,atrPeriod,allocationMode:btAllocationMode||'equal',timestamp:Date.now(),label:'Estrategia '+(savedStrategiesLength+1),
+      const result={equityCurve,weeklyLog,startVal,endVal,totalReturn,annReturn,annVol,sharpe,maxDrawdown:maxDD2,trades:tradeCount,allTrades:compactTrades,weeks:btWeeks,capital:btCapital,winRate,avgWin,avgLoss,profitFactor,sortino,calmar,avgDuration,benchCurve,benchReturn,benchSymbol:btBenchmark,riskFreePct:Number(pfRiskFree)||0,totalCommissionPaid,commission:btCommission||0,slippage:btSlippage||0,atrPeriod,allocationMode:btAllocationMode||'equal',timestamp:Date.now(),label:'Estrategia '+(savedStrategiesLength+1),
         status:validTrades.length?'ok':'no_trades',
         diagnostics:{signalStats,loadStats,tickerIssues:tickerIssues.slice(0,500),validTickers:validTickers.length},
         perf:{...perfMarks,totalMs,stages:perfStages,alignedCacheSize:maxWeekAlignedCacheSize,tickers:validTickers.length,loadStats,tickerIssues:tickerIssues.slice(0,500),signalStats,intrabarFetches,validTrades:validTrades.length,invalidTrades:allTrades.length-validTrades.length,lightMemory:backtestLocalOnlyCache,trimmedSeriesCount,trimmedBarsSaved,maxRuleLookback,simulationChunkSize,simulationChunks,simulationYieldCount,fastRuleEvalCount,fastRuleFallbackCount,cacheEntriesBefore,cacheEntriesAfter,cacheTickersReleased,batchChartRequests,batchChartSymbols,batchFetchConcurrency,transientCacheHits,transientCacheWrites,transientCacheReleased,transientCacheRemaining:transientDataCache.size,cooperativeYieldCount,cooperativeLongSliceCount},
