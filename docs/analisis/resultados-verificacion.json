@@ -1,0 +1,45 @@
+﻿{
+  "commission": {
+    "entry": 10,
+    "exit": 10,
+    "expectedTotal": 20,
+    "actualTotal": 30
+  },
+  "weights": {
+    "maxConfigured": 0.4,
+    "result": [
+      0.9302325581395349,
+      0.02325581395348837,
+      0.02325581395348837,
+      0.02325581395348837
+    ],
+    "maxActual": 0.9302325581395349
+  },
+  "drawdown": {
+    "initialCapital": 100,
+    "equity": [
+      90,
+      95
+    ],
+    "expected": 0.1,
+    "actual": 0
+  },
+  "aggregation4h": {
+    "inputHourlyBars": 7,
+    "outputBars": 1,
+    "hoursRepresented": 4
+  },
+  "syntax": {
+    "checked": 47,
+    "failures": []
+  },
+  "http": {
+    "index": 200,
+    "cover": 200,
+    "emptyBatch": {
+      "ok": true,
+      "count": 0,
+      "results": {}
+    }
+  }
+}

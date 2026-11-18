@@ -1,0 +1,14 @@
+Herramienta: image_gen integrada. Referencia: radar-onix-portada-v3.png.
+Resultado: public/assets/radar-onix-portada-v4.png
+
+Use case ads-marketing. Make a FINISHED LANDSCAPE PRODUCT COVER, 16:9, for RADAR ONIX trading strategy simulator. The provided image is a supporting software preview derived from the source code; use its specific interface as the visual product insert. The user wants a cover with strong visual hierarchy, not a full-screen screenshot.
+Design direction: human-designed premium editorial software cover, sober, precise, minimal, navy-black background #06080d, white typography, cyan #00b4ff accent. No neon, no glowing radar, no abstract sci-fi, no 3D charts, no robots, no coins, no stock photos.
+Composition: left 35% reserved for beautiful very large clean typography, right 65% features a large rectangular panel showing the supplied software interface. Panel centered vertically in the right side, entirely inside canvas with comfortable margins, facing straight forward, just a subtle thin slate border and restrained shadow. Maintain source interface contents, charts and layout: top controls, green/red entry/exit rule groups, green equity curve and red drawdown, trades table. Use a tight crop if needed for legibility, without inventing new UI. The panel is a compelling visible preview of the tool in use. This is the main visual object.
+LEFT TYPOGRAPHY exact:
+small top eyebrow "SIMULADOR DE ESTRATEGIAS"
+huge stacked title "RADAR" then "ONIX", RADAR in white, ONIX in cyan, bold modern geometric sans serif with precise kerning. Title should be instantly readable as a cover thumbnail.
+Below, smaller two-line supporting text "Analiza. Simula." then "Evalúa tu estrategia."
+At lower left restrained small text "SCANNER · BACKTESTING" and below "PORTAFOLIOS".
+Add a short thin cyan horizontal rule between title and supporting text. Leave generous clear space around typography; all elements aligned to a consistent left margin.
+Use only subtle navy tonal geometric background regions, no busy imagery. Overall image feels like a real launch cover for a professional analytics application, polished graphic design rather than AI illustration. Keep the interface modestly brighter than background for clarity, no excessive bloom or shiny edges.
+At bottom right discreet caption "Vista ilustrativa basada en el código". Preserve accurate spelling and Spanish accents. Do not use the original screenshot as the entire canvas. Recompose into the specified cover, with the large title and clear visual product showcase.

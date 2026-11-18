@@ -1,0 +1,11 @@
+Use case: ads-marketing
+Asset type: Final landscape cover image for the existing Spanish-language Radar Onix financial simulation software, approximately 16:9, high resolution.
+Primary request: Create a polished premium software cover that faithfully represents a multi-timeframe stock scanner, historical strategy backtester and portfolio analysis tool.
+Scene/backdrop: Deep near-black navy (#06080d) with subtle fine financial chart grid, restrained atmospheric blue depth.
+Subject: A luminous circular financial radar on the right half, clean concentric rings and a scanning beam in cyan (#00E5FF), electric blue (#0A8CFF) and small emerald green (#39FF88) detected signal points. Integrate tasteful candlestick chart traces, a cyan historical equity curve with visible fluctuations, and subtle portfolio allocation arcs into one cohesive dimensional analytical scene. Financial data graphics are abstract and unlabeled, not fabricated performance results.
+Style/medium: Refined cinematic 3D technical illustration combined with crisp editorial software branding. Sophisticated, minimal, precise. Very controlled glow and dark glass depth.
+Composition/framing: Wide cover. Left half has clean negative space and large perfectly readable text; right half contains the radar focal point. All text well inside safe margins, strong hierarchy, balanced spacing.
+Lighting/mood: Calm analytical confidence; luminous cyan rim light and restrained green accents.
+Text (verbatim): Main title "RADAR ONIX". Secondary line "SIMULADOR DE ESTRATEGIAS". Smaller footer line "SCANNER · BACKTESTING · PORTAFOLIOS".
+Typography: Modern strong geometric sans serif, uppercase, immaculate spacing. Main title large white with ONIX in cyan, supporting text cool light gray. Render Spanish text exactly.
+Constraints: The radar motif matches an existing brand based on concentric circles, a cyan scanning beam and green signal dots. No unrelated logo. No profit percentages, money, coins, people, robots, trophies, guarantees, ticker labels, extra text, watermarks or browser frames. This is finished cover art, not a screenshot of working software.
