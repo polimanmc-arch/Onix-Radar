@@ -6,6 +6,7 @@
 //   node scripts/run-alerts.js                 # evalúa y envía (requiere TELEGRAM_BOT_TOKEN y TELEGRAM_CHAT_ID)
 //   node scripts/run-alerts.js --dry-run       # evalúa e imprime los mensajes sin enviar
 //   node scripts/run-alerts.js --window-hours 72 --only sp500-semanal-long
+//   node scripts/run-alerts.js --force-send      # envía aunque no haya señales nuevas (prueba de conexión)
 const fs = require('node:fs');
 const path = require('node:path');
 const vm = require('node:vm');
@@ -17,10 +18,11 @@ const CORE_FILES = [
 ];
 
 function parseArgs(argv){
-  const args = { dryRun: false, windowHours: 26, only: null, file: path.join(ROOT, 'alerts', 'alerts.json'), concurrency: 12 };
+  const args = { dryRun: false, forceSend: false, windowHours: 26, only: null, file: path.join(ROOT, 'alerts', 'alerts.json'), concurrency: 12 };
   for(let i = 0; i < argv.length; i++){
     const a = argv[i];
     if(a === '--dry-run') args.dryRun = true;
+    else if(a === '--force-send') args.forceSend = true;
     else if(a === '--window-hours') args.windowHours = Number(argv[++i]);
     else if(a === '--only') args.only = argv[++i];
     else if(a === '--file') args.file = path.resolve(argv[++i]);
@@ -122,7 +124,7 @@ async function main(){
     for(const out of outputs){
       if(out.dataProblem) out.messages[out.messages.length - 1] += '\n\n⚠️ Más de la mitad de los símbolos no devolvió datos: revisa la fuente.';
       if(args.dryRun || !configured){ console.log(out.messages.join('\n---\n')); continue; }
-      if(!out.shouldSend){ console.log(`[${out.alert.id}] sin señales nuevas: no se envía nada.`); continue; }
+      if(!out.shouldSend && !args.forceSend){ console.log(`[${out.alert.id}] sin señales nuevas: no se envía nada.`); continue; }
       await sendTelegramMessages(out.messages);
       console.log(`[${out.alert.id}] enviado a Telegram (${out.messages.length} mensaje/s).`);
     }

@@ -14,6 +14,10 @@ on:
         description: 'Sólo mostrar los mensajes, sin enviarlos'
         type: boolean
         default: false
+      force_send:
+        description: 'Enviar aunque no haya señales nuevas (prueba de conexión)'
+        type: boolean
+        default: false
 
 permissions:
   contents: read
@@ -39,4 +43,5 @@ jobs:
           TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
           WINDOW_HOURS: ${{ github.event.inputs.window_hours || '26' }}
           DRY_RUN: ${{ github.event.inputs.dry_run == 'true' && '--dry-run' || '' }}
-        run: node scripts/run-alerts.js --window-hours "$WINDOW_HOURS" $DRY_RUN
+          FORCE_SEND: ${{ github.event.inputs.force_send == 'true' && '--force-send' || '' }}
+        run: node scripts/run-alerts.js --window-hours "$WINDOW_HOURS" $DRY_RUN $FORCE_SEND
