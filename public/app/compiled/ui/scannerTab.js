@@ -197,7 +197,7 @@ window.StockScannerTabs = window.StockScannerTabs || {};
             ((groups, presets) => groups.map(g => (React.createElement("div", { key: g.id, style: { marginBottom: 8 } },
                 React.createElement("div", { style: { fontSize: 8, color: "var(--text-3)", textTransform: "uppercase", letterSpacing: .8, marginBottom: 4 } }, g.label),
                 React.createElement("div", { style: { display: "flex", gap: 4, flexWrap: "wrap" } },
-                    Object.entries(presets).filter(([, v]) => v.group === g.id).map(([k, v]) => (React.createElement("button", { key: k, onClick: () => pickPreset(k), style: chipStyle(activeIds.includes(k)) },
+                    Object.entries(presets).filter(([, v]) => v.group === g.id && !v.backtestOnly).map(([k, v]) => (React.createElement("button", { key: k, onClick: () => pickPreset(k), style: chipStyle(activeIds.includes(k)) },
                         React.createElement("span", { style: { fontFamily: "var(--font-mono)", fontSize: 9 } }, activeIds.includes(k) ? "x" : "+"),
                         v.label))),
                     g.id === "us" && (React.createElement("button", { onClick: () => pickPreset('ALL_US'), disabled: fetchingAll, style: { ...chipStyle(activeIds.includes("ALL_US")), borderColor: fetchingAll ? "var(--border-light)" : "rgba(0,200,100,.4)", color: fetchingAll ? "var(--text-2)" : "var(--green)" } }, fetchingAll ? "Cargando..." : "Todo US (Auto)")))))))(window.StockScannerConfig.UNIVERSE_GROUPS || [{ id: 'us', label: 'EE. UU.' }], window.StockScannerConfig.UNIVERSE_PRESETS || {}),

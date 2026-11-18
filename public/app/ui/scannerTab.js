@@ -203,7 +203,7 @@ function UniverseSection(ctx){
         <div key={g.id} style={{marginBottom:8}}>
           <div style={{fontSize:8,color:"var(--text-3)",textTransform:"uppercase",letterSpacing:.8,marginBottom:4}}>{g.label}</div>
           <div style={{display:"flex",gap:4,flexWrap:"wrap"}}>
-            {Object.entries(presets).filter(([,v])=>v.group===g.id).map(([k,v])=>(
+            {Object.entries(presets).filter(([,v])=>v.group===g.id&&!v.backtestOnly).map(([k,v])=>(
               <button key={k} onClick={()=>pickPreset(k)} style={chipStyle(activeIds.includes(k))}>
                 <span style={{fontFamily:"var(--font-mono)",fontSize:9}}>{activeIds.includes(k) ? "x" : "+"}</span>{v.label}
               </button>

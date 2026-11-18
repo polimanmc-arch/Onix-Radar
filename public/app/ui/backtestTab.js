@@ -620,6 +620,13 @@ function renderBtUniverseSelector(ctx){
           </div>
         )))}
       </div>
+      {selectedPreset?.pointInTime&&(
+        <div role="note" style={{marginTop:6,padding:"7px 9px",border:"1px solid var(--panel-soft-border)",borderRadius:6,fontSize:10,lineHeight:1.6,color:"var(--text-2)"}}>
+          En cada semana sólo se compran acciones que pertenecían al S&P 500 en esa fecha, y se venden al salir del índice.
+          Yahoo no tiene precios de las empresas que dejaron de cotizar, así que el sesgo de supervivencia se reduce pero no desaparece:
+          la cobertura de datos se muestra en Datos y diagnóstico. Fuente: fja05680/sp500 (MIT).
+        </div>
+      )}
       {btUniverseSource==="custom"&&(
         <React.Fragment>
           <textarea rows={2} value={btCustomTickers} onChange={e=>setBtCustomTickers(e.target.value.toUpperCase())}
@@ -1482,6 +1489,33 @@ function renderWeeklyLog(backtest, btCapital, S){
   );
 }
 
+function renderPointInTimeInfo(backtest, ctx){
+  const pit=backtest?.pointInTime;
+  if(!pit) return null;
+  const {S}=ctx;
+  const fmtDate=t=>t?new Date(t*1000).toISOString().slice(0,10):'-';
+  const pct=v=>v==null?'-':Math.round(v*100)+'%';
+  const rows=[
+    ['Cobertura media', pct(pit.avgCoverage)],
+    ['Inicio', pit.first?`${pit.first.withData}/${pit.first.size} miembros con datos (${fmtDate(pit.first.time)})`:'-'],
+    ['Final', pit.last?`${pit.last.withData}/${pit.last.size} miembros con datos (${fmtDate(pit.last.time)})`:'-'],
+    ['Ventas por salir del índice', pit.removalExits||0],
+    ['Datos de composición hasta', pit.lastChange||'-'],
+  ];
+  return (
+    <div style={{...S.panel,padding:12,marginBottom:10}} aria-label="Composición histórica">
+      <div style={{fontSize:11,fontWeight:600,color:'var(--text-1)',marginBottom:6}}>{`Composición histórica · ${pit.index}`}</div>
+      <div style={{display:'grid',gridTemplateColumns:'repeat(auto-fit,minmax(200px,1fr))',gap:'4px 16px'}}>
+        {rows.map(([k,v])=><div key={k} style={{display:'flex',justifyContent:'space-between',gap:8,fontSize:11,padding:'4px 0',borderBottom:'1px solid var(--row-divider)'}}><span style={{color:'var(--text-2)'}}>{k}</span><strong style={{fontWeight:600}}>{v}</strong></div>)}
+      </div>
+      <div style={{fontSize:10,color:'var(--text-3)',marginTop:8,lineHeight:1.6}}>
+        La cobertura es la fracción de miembros del índice en cada semana que tienen historial completo en Yahoo. Los que faltan
+        (empresas excluidas que dejaron de cotizar o con poco historial) no se pueden simular: el resultado sigue algo sesgado al alza.
+      </div>
+    </div>
+  );
+}
+
 function renderBacktestDiagnostics(backtest, ctx){
   if(!backtest || (backtest.allTrades||[]).length>0 || ["cancelled","error","config_error"].includes(backtest.status)) return null;
   const {S,runBacktest,btRunning} = ctx;
@@ -1948,6 +1982,7 @@ function BacktestWorkspace({ctx}){
         <div>
           <nav className="workspace-subnav" aria-label="Vistas del backtest">{[['overview','Resumen'],['trades','Operaciones'],['analysis','Análisis'],['data','Datos y diagnóstico']].map(([key,label])=><button type="button" key={key} aria-current={view===key?'page':undefined} onClick={()=>setView(key)}>{label}</button>)}</nav>
           {view==='data'&&<>
+          {renderPointInTimeInfo(backtest,ctx)}
           {renderBacktestRunState(backtest,ctx)}
           {renderBacktestDiagnostics(backtest,ctx)}
           {renderBacktestDataQuality(backtest,ctx)}

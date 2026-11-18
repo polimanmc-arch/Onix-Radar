@@ -341,6 +341,13 @@
           }catch(e){}
         }
         rawTickers=normalizeTickerList(rawTickers);
+        // Universo histórico (point-in-time): sólo quienes fueron miembros durante la ventana.
+        const pitPreset=(window.StockScannerConfig?.UNIVERSE_PRESETS||{})[btUniverseSource];
+        const pitMembership=pitPreset?.pointInTime?window.StockScannerConfig?.INDEX_MEMBERSHIP?.[pitPreset.pointInTime]:null;
+        if(pitMembership){
+          const since=new Set(pitMembership.tickersSince(Date.now()/1000-(Number(btWeeks)+4)*7*86400));
+          rawTickers=rawTickers.filter(t=>since.has(t));
+        }
         const sourceTotal=rawTickers.length;
         const limit=Math.max(0,Math.round(Number(btUniverseLimit)||0));
         if(limit>0&&rawTickers.length>limit) rawTickers=rawTickers.slice(0,limit);
@@ -445,8 +452,18 @@
         const second = prefer==='close' ? d.opens?.[idx] : d.closes?.[idx];
         return validPrice(first) ?? validPrice(second) ?? validPrice(d.closes?.[idx+1]) ?? null;
       };
-      const validTickers=allTickers.filter(t=>allStockData[t]?.[mainTf]?.closes.length>startWeek+10);
-      const ts0=allStockData[allTickers[0]]?.[mainTf]?.times;
+      // Las series se alinean por posición desde la vela más reciente: una serie que termina antes
+      // (símbolo suspendido o con datos atrasados) quedaría desplazada en el tiempo, así que se descarta.
+      const latestBar=Math.max(0,...allTickers.map(t=>Number(allStockData[t]?.[mainTf]?.times?.[0])||0));
+      const validTickers=allTickers.filter(t=>{
+        const d=allStockData[t]?.[mainTf];
+        return d?.closes.length>startWeek+10 && (Number(d.times?.[0])||0)>=latestBar-10*86400;
+      });
+      const ts0=allStockData[validTickers[0]||allTickers[0]]?.[mainTf]?.times;
+      // Pertenencia histórica al índice (universo point-in-time).
+      const pitId=(window.StockScannerConfig?.UNIVERSE_PRESETS||{})[btUniverseSource]?.pointInTime||null;
+      const membership=pitId?window.StockScannerConfig?.INDEX_MEMBERSHIP?.[pitId]||null:null;
+      const pitStats={weeks:0,coverageSum:0,first:null,last:null,removalExits:0};
       const allowLongs=btDirection!=='short';
       const allowShorts=btDirection!=='long';
       const simulationChunkSize=validTickers.length>5000?200:validTickers.length>2500?300:validTickers.length>1000?500:validTickers.length||1;
@@ -719,11 +736,24 @@
         }
         const executionIndex=signalIndex-1;
         const mktOk = checkMktRegimeRules(signalIndex); // false -> exit holdings and block new entries this week
+        // Pertenencia al índice el viernes de la semana de señal (cierre semanal menos 2 días).
+        const decisionAt=membership?signalDecisionTime(ts0,signalIndex):null;
+        const memberTime=decisionAt!=null?decisionAt-2*86400:null;
+        const isMemberNow=t=>!membership||memberTime==null||membership.isMember(t,memberTime);
+        if(membership&&memberTime!=null){
+          const size=membership.size(memberTime);
+          let have=0; for(const t of validTickers) if(membership.isMember(t,memberTime)) have++;
+          pitStats.weeks++; pitStats.coverageSum+=size?Math.min(1,have/size):0;
+          const snap={time:memberTime,size,withData:have};
+          if(!pitStats.first) pitStats.first=snap;
+          pitStats.last=snap;
+        }
         signalStats.weeksSimulated++;
         if(!mktOk) signalStats.weeksBlocked++;
         const entrySignals=[];
         if(allowLongs && mktOk) await processTickerChunks('Entradas long',signalIndex,(ticker)=>{
           if(holdings[ticker]) return;
+          if(!isMemberNow(ticker)) return;
           const dataByTf=allStockData[ticker]; const d=dataByTf[mainTf];
           if(signalIndex>=d.closes.length-5||executionIndex>=d.opens.length) return;
           const md=getAlignedIndexMap(ticker,signalIndex);
@@ -737,6 +767,7 @@
         if(allowShorts && mktOk){
           await processTickerChunks('Entradas short',signalIndex,(ticker)=>{
             if(holdings[ticker]) return;
+            if(!isMemberNow(ticker)) return;
             if(longSignalTickers?.has(ticker)) return;
             const dataByTf=allStockData[ticker]; const d=dataByTf[mainTf];
             if(signalIndex>=d.closes.length-5||executionIndex>=d.opens.length) return;
@@ -754,6 +785,11 @@
         for(const ticker of Object.keys(holdings)){
           const dataByTf=allStockData[ticker]; const d=dataByTf?.[mainTf];
           if(!d||signalIndex>=d.closes.length-2||executionIndex>=d.opens.length) continue;
+          if(!isMemberNow(ticker)){
+            pitStats.removalExits++;
+            exitSignals.push({ticker,signalIndex,executionIndex,reason:'Salida del índice (histórico)'});
+            continue;
+          }
           if(!mktOk){
             exitSignals.push({ticker,signalIndex,executionIndex,reason:'Salida por regimen de mercado'});
             continue;
@@ -980,6 +1016,8 @@
         status:validTrades.length?'ok':'no_trades',
         diagnostics:{signalStats,loadStats,tickerIssues:tickerIssues.slice(0,500),validTickers:validTickers.length},
         perf:{...perfMarks,totalMs,stages:perfStages,alignedCacheSize:maxWeekAlignedCacheSize,tickers:validTickers.length,loadStats,tickerIssues:tickerIssues.slice(0,500),signalStats,intrabarFetches,validTrades:validTrades.length,invalidTrades:allTrades.length-validTrades.length,lightMemory:backtestLocalOnlyCache,trimmedSeriesCount,trimmedBarsSaved,maxRuleLookback,simulationChunkSize,simulationChunks,simulationYieldCount,fastRuleEvalCount:ruleEvaluator.stats.evalCount,fastRuleFallbackCount:ruleEvaluator.stats.fallbackCount,cacheEntriesBefore,cacheEntriesAfter,cacheTickersReleased,batchChartRequests,batchChartSymbols,batchFetchConcurrency,transientCacheHits,transientCacheWrites,transientCacheReleased,transientCacheRemaining:transientDataCache.size,cooperativeYieldCount,cooperativeLongSliceCount},
+        pointInTime:membership?{index:'S&P 500',source:membership.source,lastChange:membership.lastChange,
+          avgCoverage:pitStats.weeks?pitStats.coverageSum/pitStats.weeks:null,first:pitStats.first,last:pitStats.last,removalExits:pitStats.removalExits}:null,
         mktFilter:mktFilterEnabled?{enabled:true,ticker:btBenchmark,ind:'Reglas',period:(mktFilterRules||[]).length,label:'Reglas sobre '+btBenchmark,rulesCount:(mktFilterRules||[]).length,blockedWeeks:mktFilterBlockedWeeks,totalWeeks:equityCurve.length}:null,
       };
       report('Finalizando resultados',1,1);

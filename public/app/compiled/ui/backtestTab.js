@@ -542,6 +542,7 @@ window.StockScannerTabs = window.StockScannerTabs || {};
                             " (",
                             (v.tickers || []).length,
                             ")"))))))))),
+                (selectedPreset === null || selectedPreset === void 0 ? void 0 : selectedPreset.pointInTime) && (React.createElement("div", { role: "note", style: { marginTop: 6, padding: "7px 9px", border: "1px solid var(--panel-soft-border)", borderRadius: 6, fontSize: 10, lineHeight: 1.6, color: "var(--text-2)" } }, "En cada semana s\u00F3lo se compran acciones que pertenec\u00EDan al S&P 500 en esa fecha, y se venden al salir del \u00EDndice. Yahoo no tiene precios de las empresas que dejaron de cotizar, as\u00ED que el sesgo de supervivencia se reduce pero no desaparece: la cobertura de datos se muestra en Datos y diagn\u00F3stico. Fuente: fja05680/sp500 (MIT).")),
                 btUniverseSource === "custom" && (React.createElement(React.Fragment, null,
                     React.createElement("textarea", { rows: 2, value: btCustomTickers, onChange: e => setBtCustomTickers(e.target.value.toUpperCase()), placeholder: "AAPL, MSFT, NVDA, TSLA...", spellCheck: false, style: { ...S.inp, marginTop: 6, width: "100%", padding: "6px 8px", fontFamily: "var(--font-mono)", fontSize: 10, resize: "vertical" } }),
                     React.createElement("div", { style: { display: "flex", gap: 6, alignItems: "center", flexWrap: "wrap", marginTop: 6, padding: "7px 8px", border: "1px solid var(--panel-soft-border)", borderRadius: 6, background: "var(--panel-accent-bg)" } },
@@ -1342,6 +1343,27 @@ window.StockScannerTabs = window.StockScannerTabs || {};
                             hasMktFilter && React.createElement("td", { style: td({ textAlign: "center" }) }, w.mktBlocked ? React.createElement("span", { style: S.statusBadge("warning"), title: "Filtro bloqueo nuevas entradas esta semana" }, "bloqueado") : React.createElement("span", { style: S.statusBadge("neutral") }, "ok"))));
                     }))))));
     }
+    function renderPointInTimeInfo(backtest, ctx) {
+        const pit = backtest === null || backtest === void 0 ? void 0 : backtest.pointInTime;
+        if (!pit)
+            return null;
+        const { S } = ctx;
+        const fmtDate = t => t ? new Date(t * 1000).toISOString().slice(0, 10) : '-';
+        const pct = v => v == null ? '-' : Math.round(v * 100) + '%';
+        const rows = [
+            ['Cobertura media', pct(pit.avgCoverage)],
+            ['Inicio', pit.first ? `${pit.first.withData}/${pit.first.size} miembros con datos (${fmtDate(pit.first.time)})` : '-'],
+            ['Final', pit.last ? `${pit.last.withData}/${pit.last.size} miembros con datos (${fmtDate(pit.last.time)})` : '-'],
+            ['Ventas por salir del índice', pit.removalExits || 0],
+            ['Datos de composición hasta', pit.lastChange || '-'],
+        ];
+        return (React.createElement("div", { style: { ...S.panel, padding: 12, marginBottom: 10 }, "aria-label": "Composici\u00F3n hist\u00F3rica" },
+            React.createElement("div", { style: { fontSize: 11, fontWeight: 600, color: 'var(--text-1)', marginBottom: 6 } }, `Composición histórica · ${pit.index}`),
+            React.createElement("div", { style: { display: 'grid', gridTemplateColumns: 'repeat(auto-fit,minmax(200px,1fr))', gap: '4px 16px' } }, rows.map(([k, v]) => React.createElement("div", { key: k, style: { display: 'flex', justifyContent: 'space-between', gap: 8, fontSize: 11, padding: '4px 0', borderBottom: '1px solid var(--row-divider)' } },
+                React.createElement("span", { style: { color: 'var(--text-2)' } }, k),
+                React.createElement("strong", { style: { fontWeight: 600 } }, v)))),
+            React.createElement("div", { style: { fontSize: 10, color: 'var(--text-3)', marginTop: 8, lineHeight: 1.6 } }, "La cobertura es la fracci\u00F3n de miembros del \u00EDndice en cada semana que tienen historial completo en Yahoo. Los que faltan (empresas excluidas que dejaron de cotizar o con poco historial) no se pueden simular: el resultado sigue algo sesgado al alza.")));
+    }
     function renderBacktestDiagnostics(backtest, ctx) {
         var _a, _b, _c, _d, _e, _f, _g, _h, _j;
         if (!backtest || (backtest.allTrades || []).length > 0 || ["cancelled", "error", "config_error"].includes(backtest.status))
@@ -1872,6 +1894,7 @@ window.StockScannerTabs = window.StockScannerTabs || {};
             backtest && (React.createElement("div", null,
                 React.createElement("nav", { className: "workspace-subnav", "aria-label": "Vistas del backtest" }, [['overview', 'Resumen'], ['trades', 'Operaciones'], ['analysis', 'Análisis'], ['data', 'Datos y diagnóstico']].map(([key, label]) => React.createElement("button", { type: "button", key: key, "aria-current": view === key ? 'page' : undefined, onClick: () => setView(key) }, label))),
                 view === 'data' && React.createElement(React.Fragment, null,
+                    renderPointInTimeInfo(backtest, ctx),
                     renderBacktestRunState(backtest, ctx),
                     renderBacktestDiagnostics(backtest, ctx),
                     renderBacktestDataQuality(backtest, ctx),

@@ -56,4 +56,4 @@ WMA · SMA · EMA · RSI · Estocástico %K · MACD Histograma · ATR · Precio 
 
 ## Datos
 
-Yahoo Finance · Nasdaq Screener
+Yahoo Finance · Nasdaq Screener · Composición histórica del S&P 500: [fja05680/sp500](https://github.com/fja05680/sp500) (MIT). Para actualizarla: `node scripts/build-sp500-history.js`.
