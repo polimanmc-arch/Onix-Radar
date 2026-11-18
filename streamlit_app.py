@@ -1,9 +1,8 @@
 """Entry point for Streamlit Community Cloud: streamlit run streamlit_app.py."""
 import streamlit as st
 import streamlit.components.v1 as components
-import hashlib
 
-from streamlit_runtime import ROOT, NodeRuntime, prepare_frontend
+from streamlit_runtime import NodeRuntime, frontend_version as compute_frontend_version, prepare_frontend
 
 st.set_page_config(page_title='Radar Onix', page_icon='📊', layout='wide', initial_sidebar_state='collapsed')
 st.markdown('''<style>
@@ -23,7 +22,7 @@ def resources(frontend_version):
 
 
 try:
-    frontend_version = hashlib.sha256((ROOT / 'public/app/streamlitBridge.js').read_bytes()).hexdigest()
+    frontend_version = compute_frontend_version()
     runtime, frontend = resources(frontend_version)
     if runtime.process.poll() is not None:
         resources.clear()

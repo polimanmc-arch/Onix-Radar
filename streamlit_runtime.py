@@ -20,6 +20,24 @@ ROOT = Path(__file__).resolve().parent
 ALLOWED_API = re.compile(r"^/api/(?:health|tickers|quotes|sectors|chart/[A-Za-z0-9.^=\-]+|charts(?:/cache/(?:check|stats|prune))?)$")
 
 
+FRONTEND_SUFFIXES = {'.html', '.js', '.css', '.svg', '.json'}
+
+
+def frontend_version() -> str:
+    """Hash of every text asset in public/: any frontend change yields a new version.
+
+    Streamlit Cloud can keep the Python process alive after a git push, so the cached
+    frontend copy and the component URL must change whenever any served file changes,
+    not only the bridge script.
+    """
+    digest = hashlib.sha256()
+    for file in sorted((ROOT / 'public').rglob('*')):
+        if file.is_file() and file.suffix.lower() in FRONTEND_SUFFIXES:
+            digest.update(file.relative_to(ROOT).as_posix().encode('utf-8'))
+            digest.update(file.read_bytes())
+    return digest.hexdigest()
+
+
 def prepare_frontend() -> Path:
     """Keep a generated copy: the local Node app and source assets stay intact."""
     destination = ROOT / '.cache' / 'streamlit_frontend'
@@ -27,8 +45,9 @@ def prepare_frontend() -> Path:
     index = destination / 'index.html'
     html = index.read_text(encoding='utf-8')
     html = html.replace('src="/', 'src="./').replace('href="/', 'href="./')
-    version = hashlib.sha256((destination / 'app/streamlitBridge.js').read_bytes()).hexdigest()[:12]
-    html = html.replace('src="./app/streamlitBridge.js"', f'src="./app/streamlitBridge.js?v={version}"')
+    version = frontend_version()[:12]
+    # Cache-busting for every local script and stylesheet so browsers never mix releases.
+    html = re.sub(r'(src|href)="\./([^"?]+\.(?:js|css))"', lambda m: f'{m.group(1)}="./{m.group(2)}?v={version}"', html)
     index.write_text(html, encoding='utf-8')
     for file in (destination / 'app').rglob('*.js'):
         source = file.read_text(encoding='utf-8')
