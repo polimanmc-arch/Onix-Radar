@@ -32,7 +32,9 @@ except Exception as error:
     st.error(f'No se pudo iniciar Radar Onix: {error}')
     st.stop()
 
-radar = components.declare_component('onix_radar', path=str(frontend))
+# A running component keeps its iframe across Python reruns. Change its URL on
+# frontend releases so existing Cloud sessions actually load the updated bridge.
+radar = components.declare_component(f'onix_radar_{frontend_version[:12]}', path=str(frontend))
 value = radar(response=st.session_state.get('radar_response'), key='radar_workspace', default=None)
 if isinstance(value, dict) and value.get('batch_id') and value.get('batch_id') != st.session_state.get('radar_last_batch'):
     st.session_state.radar_response = runtime.batch(value)
