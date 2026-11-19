@@ -91,5 +91,31 @@ class NodeProvisioningTests(unittest.TestCase):
         self.assertGreaterEqual(node_major(choose_node()), 18)
 
 
+
+class SingleRuntimeTests(unittest.TestCase):
+    """Un solo servidor de Node: se reutiliza y, si cambia el código, se cierra el anterior."""
+
+    def test_reuse_and_replace(self):
+        import streamlit_runtime as rt
+        original = rt.server_version
+        try:
+            rt.server_version = lambda: 'v1'
+            first = rt.get_runtime()
+            self.assertIs(rt.get_runtime(), first)
+            rt.server_version = lambda: 'v2'
+            second = rt.get_runtime()
+            self.assertIsNot(second, first)
+            self.assertIsNotNone(first.process.poll(), 'the previous Node server was stopped')
+            self.assertIsNone(second.process.poll())
+            second.process.kill(); second.process.wait(timeout=5)
+            third = rt.get_runtime()
+            self.assertIsNot(third, second, 'a crashed server is restarted')
+        finally:
+            rt.server_version = original
+            if rt._runtime is not None:
+                rt._runtime.close()
+                rt._runtime, rt._runtime_key = None, None
+
+
 if __name__ == '__main__':
     unittest.main()

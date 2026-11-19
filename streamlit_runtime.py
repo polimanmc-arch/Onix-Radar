@@ -9,6 +9,8 @@ import io
 import os
 import platform
 import tarfile
+import tempfile
+import threading
 from pathlib import Path
 import re
 import shutil
@@ -78,13 +80,22 @@ def provision_node(dest: Path | None = None, suffix: str | None = None, opener=u
     if not entry or len(entry) != 2:
         raise RuntimeError(f'No hay binario de Node para {suffix}.')
     expected, name = entry
-    with opener(NODE_DIST + name, timeout=300) as response:
-        data = response.read()
-    if hashlib.sha256(data).hexdigest() != expected:
-        raise RuntimeError('La suma SHA-256 del binario de Node no coincide: no se usa.')
     dest.mkdir(parents=True, exist_ok=True)
-    with tarfile.open(fileobj=io.BytesIO(data), mode='r:xz') as archive:
-        archive.extractall(dest, filter='data')
+    # En streaming a un archivo temporal: no se carga el binario entero en memoria.
+    digest = hashlib.sha256()
+    with tempfile.NamedTemporaryFile(dir=dest, suffix='.tar.xz', delete=False) as tmp:
+        tmp_path = Path(tmp.name)
+        with opener(NODE_DIST + name, timeout=300) as response:
+            while chunk := response.read(1 << 20):
+                digest.update(chunk)
+                tmp.write(chunk)
+    try:
+        if digest.hexdigest() != expected:
+            raise RuntimeError('La suma SHA-256 del binario de Node no coincide: no se usa.')
+        with tarfile.open(tmp_path, mode='r:xz') as archive:
+            archive.extractall(dest, filter='data')
+    finally:
+        tmp_path.unlink(missing_ok=True)
     node = dest / name[:-len('.tar.xz')] / 'bin' / 'node'
     if verify and node_major(str(node)) < MIN_NODE_MAJOR:
         return None
@@ -103,6 +114,43 @@ def choose_node() -> str | None:
     except Exception as error:  # la app sigue con el Node del sistema y el cliente de Yahoo propio
         print(f'[Radar Onix] Node {MIN_NODE_MAJOR} no disponible: {error}', flush=True)
     return system
+
+
+def server_version() -> str:
+    """Huella del código que ejecuta Node: si no cambia, se reutiliza el mismo servidor."""
+    digest = hashlib.sha256()
+    files = [ROOT / 'server.js', ROOT / 'package-lock.json', *sorted((ROOT / 'server').rglob('*.js')),
+             ROOT / 'public' / 'app' / 'core' / 'alerts.js']
+    for file in files:
+        if file.is_file():
+            digest.update(file.relative_to(ROOT).as_posix().encode('utf-8'))
+            digest.update(file.read_bytes())
+    return digest.hexdigest()
+
+
+_runtime_lock = threading.Lock()
+_runtime: 'NodeRuntime | None' = None
+_runtime_key: str | None = None
+
+
+def get_runtime() -> 'NodeRuntime':
+    """Un único servidor de Node por proceso de Streamlit.
+
+    Antes se guardaba en st.cache_resource con la versión del frontend como clave: cada despliegue
+    creaba un servidor nuevo sin cerrar los anteriores y la app acababa sin memoria.
+    """
+    global _runtime, _runtime_key
+    key = server_version()
+    with _runtime_lock:
+        alive = _runtime is not None and _runtime.process.poll() is None
+        if alive and _runtime_key == key:
+            return _runtime
+        if _runtime is not None:
+            _runtime.close()
+        _runtime, _runtime_key = None, None
+        _runtime = NodeRuntime()
+        _runtime_key = key
+        return _runtime
 
 
 def prepare_frontend() -> Path:
@@ -150,7 +198,9 @@ class NodeRuntime:
         self._log = self.log_path.open('ab')
         self.process = subprocess.Popen(
             [node, 'server.js'], cwd=ROOT,
-            env={**os.environ, 'HOST': '127.0.0.1', 'PORT': str(self.port)},
+            env={**os.environ, 'HOST': '127.0.0.1', 'PORT': str(self.port),
+                 # Red de seguridad: si Node supera este montón se cae y get_runtime() lo reinicia.
+                 'NODE_OPTIONS': os.environ.get('NODE_OPTIONS', '--max-old-space-size=768')},
             stdout=self._log, stderr=subprocess.STDOUT,
             creationflags=subprocess.CREATE_NO_WINDOW if os.name == 'nt' else 0,
         )
