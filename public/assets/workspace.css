@@ -559,3 +559,61 @@ label.simple-capital em{font-style:normal;font-weight:700;color:var(--text-1)}
 .simple-mail{display:inline-flex;align-items:center;gap:7px;padding:7px 16px;border-radius:999px;border:1px solid var(--border);background:var(--bg-1);color:var(--text-0);font:600 14px var(--font-body);text-decoration:none}
 .simple-mail:hover{border-color:var(--accent);color:var(--accent)}
 .simple-mail:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
+
+/* ══ Modo oscuro con el mismo estilo editorial del claro (sus colores de siempre: fondo #101116,
+      acento lila #8490ff, verde #6acfa0): cuadrícula suave, Archivo en titulares, Inter en el texto,
+      tarjetas redondeadas, botones píldora y lo elegido invertido (claro sobre oscuro) ═══════════════ */
+:root:not([data-theme="light"]){
+  --font-body:'Inter',system-ui,sans-serif;
+  --font-display:'Archivo','Inter',system-ui,sans-serif;
+  --shadow-card:0 1px 0 rgba(255,255,255,.03) inset,0 18px 40px -24px rgba(0,0,0,.8);
+}
+:root:not([data-theme="light"]) body{
+  background-color:var(--bg-0);
+  background-image:linear-gradient(rgba(132,144,255,.045) 1px,transparent 1px),linear-gradient(90deg,rgba(132,144,255,.045) 1px,transparent 1px);
+  background-size:48px 48px;
+  font-family:var(--font-body);
+}
+:root:not([data-theme="light"]) ::selection{background:var(--green);color:#101116}
+
+/* Titulares */
+:root:not([data-theme="light"]) .simple-hero h1{font-family:var(--font-display);font-weight:900;font-size:clamp(34px,5.2vw,64px);letter-spacing:-.045em;line-height:.95;margin-bottom:14px}
+:root:not([data-theme="light"]) .simple-hero h1::after{content:'';display:inline-block;width:.2em;height:.2em;margin-left:.06em;background:var(--accent);vertical-align:baseline}
+:root:not([data-theme="light"]) .simple-hero p{font-size:18px;color:var(--text-1)}
+:root:not([data-theme="light"]) .simple-step h2,:root:not([data-theme="light"]) .simple-panel h2,:root:not([data-theme="light"]) .simple-ranking h2,:root:not([data-theme="light"]) .simple-result-title{font-family:var(--font-display);font-weight:800;letter-spacing:-.02em}
+:root:not([data-theme="light"]) .simple-kpis strong,:root:not([data-theme="light"]) .simple-score strong,:root:not([data-theme="light"]) .simple-facts strong{font-family:var(--font-display);font-weight:800;letter-spacing:-.02em}
+:root:not([data-theme="light"]) .simple-credit b{font-family:var(--font-display)}
+
+/* Superficies */
+:root:not([data-theme="light"]) .simple-panel,:root:not([data-theme="light"]) .simple-ranking,:root:not([data-theme="light"]) .simple-launch,:root:not([data-theme="light"]) .simple-next,:root:not([data-theme="light"]) .simple-loading,:root:not([data-theme="light"]) .simple-saved{
+  background:var(--bg-1);border:1px solid var(--border);border-radius:24px;box-shadow:var(--shadow-card)}
+:root:not([data-theme="light"]) .simple-launch,:root:not([data-theme="light"]) .simple-next{border-style:dashed;border-color:rgba(132,144,255,.4)}
+:root:not([data-theme="light"]) .simple-loading{border:1px solid var(--accent)}
+:root:not([data-theme="light"]) .simple-card{border:1px solid var(--border);border-radius:20px;background:var(--bg-1);box-shadow:var(--shadow-card);transition:transform .15s ease,box-shadow .15s ease}
+:root:not([data-theme="light"]) .simple-card:hover:not(:disabled){transform:translateY(-2px)}
+:root:not([data-theme="light"]) .simple-card[aria-pressed="true"]{border-color:var(--text-0);background:var(--bg-1);box-shadow:0 0 0 2px var(--text-0),var(--shadow-card)}
+:root:not([data-theme="light"]) .simple-kpis div,:root:not([data-theme="light"]) .simple-candles,:root:not([data-theme="light"]) .simple-score{background:var(--bg-2);border-radius:16px}
+
+/* Botones píldora: elegido = claro sobre oscuro; acción principal = lila */
+:root:not([data-theme="light"]) .simple-options button,:root:not([data-theme="light"]) .simple-periods button,:root:not([data-theme="light"]) .mode-switch,:root:not([data-theme="light"]) .simple-switch{
+  background:var(--bg-1);border:1px solid var(--border-light);color:var(--text-0);box-shadow:0 12px 30px -18px rgba(0,0,0,.9)}
+:root:not([data-theme="light"]) .simple-options button[aria-pressed="true"],:root:not([data-theme="light"]) .simple-periods button[aria-pressed="true"],
+:root:not([data-theme="light"]) .mode-switch button[aria-pressed="true"],:root:not([data-theme="light"]) .simple-switch button[aria-pressed="true"]{background:var(--text-0);border-color:var(--text-0);color:#101116}
+:root:not([data-theme="light"]) .simple-options button[aria-pressed="true"] small{background:rgba(16,17,22,.12);color:#101116}
+:root:not([data-theme="light"]) .simple-play{border-radius:999px;font-family:var(--font-display);font-weight:800;letter-spacing:-.01em;color:#101116;box-shadow:0 16px 32px -14px rgba(132,144,255,.65)}
+:root:not([data-theme="light"]) .simple-play:disabled{background:var(--bg-3);color:var(--text-2);box-shadow:none}
+
+/* Camino 1-5 y números: listo = verde con número oscuro; pendiente = claro */
+:root:not([data-theme="light"]) .simple-path{background:rgba(16,17,22,.92);backdrop-filter:blur(8px)}
+:root:not([data-theme="light"]) .simple-path li>button{background:var(--bg-1);border:1px solid var(--border-light);border-radius:999px;box-shadow:0 12px 30px -20px rgba(0,0,0,.9)}
+:root:not([data-theme="light"]) .simple-path li[data-state="done"]>button{border-color:rgba(106,207,160,.45)}
+:root:not([data-theme="light"]) .simple-path li[data-state="done"] small{color:var(--text-1)}
+:root:not([data-theme="light"]) .simple-path li[data-state="done"] .dot,:root:not([data-theme="light"]) .simple-step-n.done,:root:not([data-theme="light"]) .simple-panel-n.done{background:var(--green);color:#101116}
+:root:not([data-theme="light"]) .simple-step-n,:root:not([data-theme="light"]) .simple-panel-n{background:var(--text-0);color:#101116}
+
+/* Etiquetas */
+:root:not([data-theme="light"]) .simple-rule-chip,:root:not([data-theme="light"]) .simple-scan-rules .simple-market-filter{background:var(--bg-1);border:1px solid var(--border-light);border-radius:999px}
+:root:not([data-theme="light"]) .simple-badge,:root:not([data-theme="light"]) .simple-ind-list i{border-radius:999px}
+:root:not([data-theme="light"]) .simple-table tbody tr.sel td,:root:not([data-theme="light"]) .simple-ranking tr.sel td{background:rgba(106,207,160,.10)}
+:root:not([data-theme="light"]) .simple-byline{box-shadow:0 12px 30px -18px rgba(0,0,0,.9);border-color:var(--border-light)}
+:root:not([data-theme="light"]) .simple-capital input,:root:not([data-theme="light"]) .simple-years input,:root:not([data-theme="light"]) .simple-years button{background:var(--bg-1);border-color:var(--border-light)}
