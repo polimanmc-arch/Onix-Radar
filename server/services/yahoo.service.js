@@ -3,6 +3,7 @@ const { getDiskCache, setDiskCache, pruneDiskCache } = require('../utils/diskCac
 const { fetchJson, fetchText } = require('../utils/http');
 const SECTOR_MAP = require('../data/sectorMap');
 const yf2 = require('./yahooFinance2');
+const { getUsSector } = require('./nasdaq.service');
 
 const CHART_MEMORY_TTL_MS = Number(process.env.ONIX_CHART_MEMORY_TTL_MS) || 15 * 60_000;
 const CHART_DISK_TTL_MS = Number(process.env.ONIX_CHART_DISK_TTL_MS) || 12 * 60 * 60 * 1000;
@@ -217,6 +218,16 @@ async function getSectorForSymbol(symbol) {
     }
   }
 
+  // Respaldo rápido para acciones de EE. UU.: el sector de Nasdaq (una sola descarga en caché).
+  // Desde servidores en la nube Yahoo suele negar el perfil de la empresa, y las demás fuentes son lentas.
+  try {
+    const us = await getUsSector(symbol);
+    if (us?.sector) {
+      setCache(cacheKey, us, 6 * 60 * 60 * 1000);
+      return us;
+    }
+  } catch (_) {}
+
   const quoteUrls = [
     `https://query1.finance.yahoo.com/v7/finance/quote?symbols=${encodeURIComponent(symbol)}`,
     `https://query2.finance.yahoo.com/v7/finance/quote?symbols=${encodeURIComponent(symbol)}`
@@ -246,7 +257,7 @@ async function getSectorForSymbol(symbol) {
       const resultNode = data?.quoteSummary?.result?.[0] || {};
       const quoteType = (resultNode?.quoteType?.quoteType || '').toUpperCase();
       const result = classify({
-        sector: resultNode?.assetProfile?.sector || resultNode?.summaryProfile?.sector || (quoteType === 'ETF' ? 'ETF' : quoteType === 'MUTUALFUND' ? 'Mutual Fund' : quoteType),
+        sector: resultNode?.assetProfile?.sector || resultNode?.summaryProfile?.sector || (quoteType === 'ETF' ? 'ETF' : quoteType === 'MUTUALFUND' ? 'Mutual Fund' : ''),
         industry: resultNode?.assetProfile?.industry || resultNode?.summaryProfile?.industry || resultNode?.price?.exchangeName || resultNode?.price?.longName || ''
       });
       if (result) {

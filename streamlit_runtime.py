@@ -24,7 +24,7 @@ from urllib.parse import unquote, urlsplit
 from urllib.request import Request, urlopen
 
 ROOT = Path(__file__).resolve().parent
-ALLOWED_API = re.compile(r"^/api/(?:health|tickers|quotes|sectors|chart/[A-Za-z0-9.^=\-]+|charts(?:/cache/(?:check|stats|prune))?|telegram/(?:status|send))$")
+ALLOWED_API = re.compile(r"^/api/(?:health|tickers(?:/russell2000)?|quotes|sectors|chart/[A-Za-z0-9.^=\-]+|charts(?:/cache/(?:check|stats|prune))?|telegram/(?:status|send))$")
 
 
 FRONTEND_SUFFIXES = {'.html', '.js', '.css', '.svg', '.json'}
