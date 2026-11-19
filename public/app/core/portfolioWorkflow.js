@@ -25,6 +25,107 @@
     return y+'-'+m+'-'+day;
   }
 
+  // ── Hierarchical Risk Parity (López de Prado, 2016) ──────────────────────
+  // 1) distancia de correlación d_ij = sqrt((1-ρ_ij)/2); 2) distancia entre columnas de d;
+  // 3) agrupación jerárquica de enlace simple → orden cuasi-diagonal; 4) bisección recursiva
+  // repartiendo el peso en proporción inversa a la varianza de cada mitad.
+  // No invierte la matriz de covarianzas: es estable con pocos datos y activos muy correlacionados.
+  function hrpWeights(cov){
+    const n = Array.isArray(cov) ? cov.length : 0;
+    if(!n) return { weights: [], order: [] };
+    if(n === 1) return { weights: [1], order: [0] };
+    const sd = cov.map((row, i) => Math.sqrt(Math.max(row[i], 1e-18)));
+    const d = cov.map((row, i) => row.map((c, j) => {
+      const rho = Math.max(-1, Math.min(1, c / (sd[i] * sd[j])));
+      return Math.sqrt(Math.max(0, (1 - rho) / 2));
+    }));
+    const dd = d.map((ri, i) => d.map((rj, j) => {
+      if(i === j) return 0;
+      let s = 0; for(let k = 0; k < n; k++) s += (ri[k] - rj[k]) ** 2;
+      return Math.sqrt(s);
+    }));
+    let clusters = Array.from({ length: n }, (_, i) => [i]);
+    while(clusters.length > 1){
+      let best = null;
+      for(let a = 0; a < clusters.length; a++) for(let b = a + 1; b < clusters.length; b++){
+        let link = Infinity;
+        for(const i of clusters[a]) for(const j of clusters[b]) if(dd[i][j] < link) link = dd[i][j];
+        if(!best || link < best.link - 1e-15) best = { a, b, link };
+      }
+      const merged = [...clusters[best.a], ...clusters[best.b]];
+      clusters = clusters.filter((_, k) => k !== best.a && k !== best.b);
+      clusters.push(merged);
+    }
+    const order = clusters[0];
+    const clusterVar = items => {
+      const inv = items.map(i => 1 / Math.max(cov[i][i], 1e-18));
+      const s = inv.reduce((a, b) => a + b, 0);
+      const w = inv.map(x => x / s);
+      let v = 0;
+      items.forEach((i, a) => items.forEach((j, b) => { v += w[a] * w[b] * cov[i][j]; }));
+      return v;
+    };
+    const weights = Array(n).fill(1);
+    const stack = [order];
+    while(stack.length){
+      const c = stack.pop();
+      if(c.length <= 1) continue;
+      const half = c.length >> 1;
+      const left = c.slice(0, half), right = c.slice(half);
+      const vl = clusterVar(left), vr = clusterVar(right);
+      const alpha = vl + vr > 0 ? 1 - vl / (vl + vr) : 0.5;
+      left.forEach(i => { weights[i] *= alpha; });
+      right.forEach(i => { weights[i] *= 1 - alpha; });
+      stack.push(left, right);
+    }
+    return { weights, order };
+  }
+
+  // ── X-ray: revisión de riesgos de concentración y diversificación (idea de Ghostfolio) ──
+  const XRAY_LIMITS = { position: 0.25, top3: 0.5, sector: 0.4, effective: 5, corr: 0.8, cash: 0.2 };
+  function portfolioXray(portfolio, limits = XRAY_LIMITS){
+    const L = { ...XRAY_LIMITS, ...limits };
+    const allocs = (portfolio?.allocations || []).filter(a => Number.isFinite(a.weight) && a.weight > 0);
+    if(!allocs.length) return [];
+    const pct = v => (v * 100).toFixed(1) + '%';
+    const invested = allocs.reduce((s, a) => s + a.weight, 0);
+    const sorted = [...allocs].sort((a, b) => b.weight - a.weight);
+    const checks = [];
+    const top = sorted[0];
+    checks.push(top.weight > L.position
+      ? { id: 'position', level: 'warn', title: 'Posición dominante', detail: `${top.ticker} pesa ${pct(top.weight)} (límite orientativo ${pct(L.position)}).` }
+      : { id: 'position', level: 'ok', title: 'Peso por posición', detail: `La mayor es ${top.ticker} con ${pct(top.weight)}.` });
+    const top3 = sorted.slice(0, 3).reduce((s, a) => s + a.weight, 0);
+    checks.push(top3 > L.top3
+      ? { id: 'top3', level: 'warn', title: 'Concentración en 3 valores', detail: `${sorted.slice(0, 3).map(a => a.ticker).join(', ')} suman ${pct(top3)}.` }
+      : { id: 'top3', level: 'ok', title: 'Tres mayores posiciones', detail: `Suman ${pct(top3)}.` });
+    const sectors = {};
+    allocs.forEach(a => { const k = a.sector || 'Sin sector'; sectors[k] = (sectors[k] || 0) + a.weight; });
+    const [topSector, topSectorW] = Object.entries(sectors).sort((a, b) => b[1] - a[1])[0];
+    checks.push(topSectorW > L.sector && topSector !== 'Other'
+      ? { id: 'sector', level: 'warn', title: 'Concentración sectorial', detail: `${topSector}: ${pct(topSectorW)} de la cartera.` }
+      : { id: 'sector', level: 'ok', title: 'Sectores', detail: `Mayor exposición: ${topSector} con ${pct(topSectorW)} (${Object.keys(sectors).length} sectores).` });
+    const nEff = 1 / allocs.reduce((s, a) => s + (a.weight / invested) ** 2, 0);
+    checks.push(nEff < L.effective
+      ? { id: 'effective', level: 'warn', title: 'Poca diversificación', detail: `Equivale a ${nEff.toFixed(1)} posiciones iguales (${allocs.length} reales).` }
+      : { id: 'effective', level: 'ok', title: 'Diversificación', detail: `Equivale a ${nEff.toFixed(1)} posiciones iguales (${allocs.length} reales).` });
+    const rows = portfolio.correlationMatrix || [];
+    const held = new Set(allocs.map(a => a.ticker));
+    const pairs = [];
+    rows.forEach((r, i) => r.row.forEach((rho, j) => {
+      if(j <= i) return;
+      const other = rows[j]?.ticker;
+      if(held.has(r.ticker) && held.has(other) && rho > L.corr) pairs.push({ a: r.ticker, b: other, rho });
+    }));
+    pairs.sort((x, y) => y.rho - x.rho);
+    checks.push(pairs.length
+      ? { id: 'corr', level: 'warn', title: 'Posiciones muy correlacionadas', detail: pairs.slice(0, 3).map(p => `${p.a}/${p.b} ${p.rho.toFixed(2)}`).join(' · ') + (pairs.length > 3 ? ` y ${pairs.length - 3} más` : '') }
+      : { id: 'corr', level: 'ok', title: 'Correlaciones', detail: `Ningún par supera ${L.corr.toFixed(2)}.` });
+    const cash = Math.max(0, 1 - invested);
+    if(cash > L.cash) checks.push({ id: 'cash', level: 'info', title: 'Efectivo sin invertir', detail: `${pct(cash)} queda en efectivo por los límites de peso.` });
+    return checks;
+  }
+
   async function buildPortfolioWorkflow(opts){
     const {
       results, filters, shortFilters,
@@ -227,7 +328,7 @@
 
       // Equal-weight mode skips sampling entirely for the "chosen" portfolio,
       // but we still run reduced sampling to draw the frontier backdrop.
-      const effectiveSims = pfMode === 'equalweight' ? Math.min(sims, 5000) : sims;
+      const effectiveSims = (pfMode === 'equalweight' || pfMode === 'hrp') ? Math.min(sims, 5000) : sims;
       const sampleBatch=(start,end)=>{
       for(let sim=start;sim<end;sim++){
         const w=drawWeights();
@@ -257,11 +358,23 @@
         return { weights: ewWeights, ret:r, vol, sharpe: vol>0 ? (r-rf)/vol : 0 };
       })();
 
+      // HRP sobre la covarianza con signo (para cortos el riesgo se mide en la dirección de la posición).
+      const hrpPoint = (()=>{
+        const signedCov = covMat.map((row,i)=>row.map((c,j)=>c*sel[i].sign*sel[j].sign));
+        const { weights } = hrpWeights(signedCov);
+        const w = applyWeightBounds(weights.map((x,i)=>x*sel[i].sign), minW, capPerName);
+        let r=0; for(let i=0;i<m;i++) r+=w[i]*sel[i].annRetRaw;
+        let v=0; for(let i=0;i<m;i++) for(let j=0;j<m;j++) v+=w[i]*w[j]*covMat[i][j];
+        const vol = Math.sqrt(Math.max(0,v));
+        return { weights: w, ret:r, vol, sharpe: vol>0 ? (r-rf)/vol : 0 };
+      })();
+
       let chosen;
       if(pfMode === 'maxsharpe') chosen = bestSharpe;
       else if(pfMode === 'minvol') chosen = bestMinVol;
       else if(pfMode === 'maxret') chosen = bestRet;
       else if(pfMode === 'equalweight') chosen = ewPoint;
+      else if(pfMode === 'hrp') chosen = hrpPoint;
       else chosen = bestSharpe;
       chosen = { ...chosen, weights: applyWeightBounds(chosen.weights || [], minW, capPerName) };
       if(!Array.isArray(chosen.weights) || chosen.weights.length !== m || chosen.weights.some(w=>!Number.isFinite(w))){
@@ -383,6 +496,7 @@
         altMinVolPoint:{vol:bestMinVol.vol*100,ret:bestMinVol.ret*100},
         altMaxRetPoint:{vol:bestRet.vol*100,ret:bestRet.ret*100},
         altEqualWeightPoint:{vol:ewPoint.vol*100,ret:ewPoint.ret*100},
+        altHrpPoint:{vol:hrpPoint.vol*100,ret:hrpPoint.ret*100},
         totalStocks:stockData.length,afterCorFilter:sel.length,removedByCor:stockData.length-sel.length,
         portReturn:simAnnReturn,portVol:eqVol,portSharpe:simSharpe,
         cash:finalPt.cash,endingEquity:finalPt.value,
@@ -397,5 +511,5 @@
     }
   }
 
-  window.StockScannerCore = Object.assign(window.StockScannerCore||{}, { buildPortfolioWorkflow });
+  window.StockScannerCore = Object.assign(window.StockScannerCore||{}, { buildPortfolioWorkflow, hrpWeights, portfolioXray });
 })();

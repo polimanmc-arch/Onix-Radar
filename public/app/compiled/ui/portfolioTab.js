@@ -146,7 +146,9 @@ window.StockScannerTabs = window.StockScannerTabs || {};
     function ConfigBadge({ pfMode, pfSims, allocCount }) {
         const text = pfMode === 'equalweight'
             ? "EQUAL WEIGHT - " + (allocCount || "N") + " POS"
-            : "MARKOWITZ - " + (pfSims || 0).toLocaleString() + " ITER.";
+            : pfMode === 'hrp'
+                ? "HRP - " + (allocCount || "N") + " POS"
+                : "MARKOWITZ - " + (pfSims || 0).toLocaleString() + " ITER.";
         return (React.createElement("div", { style: { fontSize: 9, textTransform: "uppercase", letterSpacing: 1.5, color: "var(--text-3)", fontWeight: 600, fontFamily: "var(--font-mono)" } }, text));
     }
     function formatPct(v) {
@@ -321,7 +323,8 @@ window.StockScannerTabs = window.StockScannerTabs || {};
                         React.createElement("option", { value: "maxsharpe" }, "Max Sharpe"),
                         React.createElement("option", { value: "minvol" }, "Min Varianza"),
                         React.createElement("option", { value: "maxret" }, "Max Return"),
-                        React.createElement("option", { value: "equalweight" }, "Equal Weight"))),
+                        React.createElement("option", { value: "equalweight" }, "Equal Weight"),
+                        React.createElement("option", { value: "hrp" }, "HRP (paridad de riesgo jer\u00E1rquica)"))),
                 React.createElement(Field, { label: "Stop-Loss" },
                     React.createElement("div", { style: { display: "flex", gap: 6, alignItems: "center", flexWrap: "wrap" } },
                         React.createElement("button", { onClick: () => { setPfPreset('custom'); setPfStopType("none"); }, style: sideStopBtn(pfStopType === "none") }, "Sin stop"),
@@ -423,7 +426,8 @@ window.StockScannerTabs = window.StockScannerTabs || {};
             : portfolio.mode === 'minvol' ? 'Min Varianza'
                 : portfolio.mode === 'maxret' ? 'Max Return'
                     : portfolio.mode === 'equalweight' ? 'Equal Weight'
-                        : portfolio.mode;
+                        : portfolio.mode === 'hrp' ? 'HRP'
+                            : portfolio.mode;
         const side = (portfolio.scanDirection || scanDirection || 'long').toLowerCase();
         const sideLabel = side === 'short' ? 'SHORT' : 'LONG';
         const sideColor = side === 'short' ? 'var(--purple)' : 'var(--green)';
@@ -692,6 +696,24 @@ window.StockScannerTabs = window.StockScannerTabs || {};
         return (React.createElement("div", { style: { marginTop: 12, display: "flex", gap: 6 } },
             React.createElement("button", { onClick: doExport, style: S.ghostBtn }, "Exportar CSV")));
     }
+    // ── X-ray: avisos de concentración y diversificación ─────────────────────────
+    function XrayCard({ portfolio, S }) {
+        const checks = React.useMemo(() => window.StockScannerCore.portfolioXray(portfolio), [portfolio]);
+        if (!checks.length)
+            return null;
+        const warns = checks.filter(c => c.level === 'warn').length;
+        const tone = { warn: 'var(--amber)', ok: 'var(--green)', info: 'var(--text-2)' };
+        const icon = { warn: '!', ok: '✓', info: 'i' };
+        return (React.createElement("section", { "aria-label": "X-ray del portafolio", style: { ...S.panel, padding: 14, marginBottom: 12 } },
+            React.createElement("div", { style: { display: 'flex', justifyContent: 'space-between', alignItems: 'baseline', gap: 8, marginBottom: 8, flexWrap: 'wrap' } },
+                React.createElement("strong", { style: { fontSize: 13 } }, "X-ray"),
+                React.createElement("span", { style: { fontSize: 11, color: warns ? 'var(--amber)' : 'var(--green)' } }, warns ? `${warns} aviso${warns > 1 ? 's' : ''}` : 'Sin avisos')),
+            React.createElement("div", { style: { display: 'grid', gridTemplateColumns: 'repeat(auto-fit,minmax(240px,1fr))', gap: 8 } }, checks.map(c => (React.createElement("div", { key: c.id, style: { display: 'flex', gap: 8, alignItems: 'flex-start', padding: '8px 10px', border: '1px solid var(--panel-soft-border)', borderRadius: 6 } },
+                React.createElement("span", { "aria-hidden": "true", style: { width: 18, height: 18, flex: '0 0 18px', borderRadius: 9, display: 'inline-flex', alignItems: 'center', justifyContent: 'center', fontSize: 11, fontWeight: 700, color: tone[c.level], border: `1px solid ${tone[c.level]}` } }, icon[c.level]),
+                React.createElement("div", { style: { minWidth: 0 } },
+                    React.createElement("div", { style: { fontSize: 12, fontWeight: 600, color: 'var(--text-1)' } }, c.title),
+                    React.createElement("div", { style: { fontSize: 11, color: 'var(--text-2)', lineHeight: 1.5 } }, c.detail))))))));
+    }
     function PortfolioResults({ ctx }) {
         const [view, setView] = React.useState('overview');
         const { S, portfolio, pfSims, pfStopType, pfMaxWeight, pfRiskFree, scanDirection, setSelectedChart } = ctx;
@@ -699,6 +721,7 @@ window.StockScannerTabs = window.StockScannerTabs || {};
             React.createElement("nav", { className: "workspace-subnav", "aria-label": "Vistas del portafolio" }, [['overview', 'Resumen'], ['positions', 'Posiciones'], ['correlation', 'Correlación']].map(([key, label]) => React.createElement("button", { type: "button", key: key, "aria-current": view === key ? 'page' : undefined, onClick: () => setView(key) }, label))),
             React.createElement(KpiRow, { portfolio: portfolio, pfRiskFree: pfRiskFree, S: S }),
             view === 'overview' && React.createElement(InfoBar, { portfolio: portfolio, pfSims: pfSims, pfStopType: pfStopType, scanDirection: scanDirection, S: S }),
+            view === 'overview' && React.createElement(XrayCard, { portfolio: portfolio, S: S }),
             view === 'overview' && React.createElement("div", { className: "ro-stack-mobile", style: { display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12, marginBottom: 12 } },
                 React.createElement(EfficientFrontierCard, { portfolio: portfolio, S: S }),
                 React.createElement(UnifiedDonutCard, { portfolio: portfolio, S: S })),
@@ -766,7 +789,7 @@ window.StockScannerTabs = window.StockScannerTabs || {};
                     React.createElement("b", { style: { color: 'var(--text-1)' } }, pfMaxPos)),
                 React.createElement("div", { style: { fontSize: 10, color: 'var(--text-2)' } },
                     "Modo: ",
-                    React.createElement("b", { style: { color: 'var(--text-1)' } }, pfMode === 'minvol' ? 'Min Varianza' : pfMode === 'maxsharpe' ? 'Max Sharpe' : pfMode === 'maxret' ? 'Max Return' : 'Equal Weight'))),
+                    React.createElement("b", { style: { color: 'var(--text-1)' } }, pfMode === 'minvol' ? 'Min Varianza' : pfMode === 'maxsharpe' ? 'Max Sharpe' : pfMode === 'maxret' ? 'Max Return' : pfMode === 'hrp' ? 'HRP' : 'Equal Weight'))),
             false && React.createElement("button", { onClick: buildPortfolio, disabled: pfBuilding || !canActuallyBuild, style: {
                     width: "100%", padding: "16px 24px", marginBottom: 14,
                     border: "1px solid " + (canActuallyBuild && !pfBuilding ? "var(--accent)" : "var(--border)"),

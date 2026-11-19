@@ -230,3 +230,11 @@ test('ATR follows Wilder smoothing from the oldest bar and reacts to recent vola
   const s=ev.getSeries(d,'ATR',{p:n});
   assert.ok(Math.abs(s[0]-cur)<1e-12 && Math.abs(s[5]-core.calcATR(highs.slice(5),lows.slice(5),closes.slice(5),n)[0])<1e-12);
 });
+
+test('portfolio HRP mode builds bounded weights and reports the HRP point',async()=>{
+  const r=await runPortfolio({pfMode:'hrp'});
+  assert.equal(r.mode,'hrp');
+  assert.ok(r.altHrpPoint && Number.isFinite(r.altHrpPoint.vol));
+  for(const a of r.allocations){ assert.ok(a.weight>=0.05-1e-9 && a.weight<=0.6+1e-9, a.ticker+' '+a.weight); }
+  assert.ok(Math.abs(r.allocations.reduce((s,a)=>s+a.weight,0)-1)<1e-9);
+});

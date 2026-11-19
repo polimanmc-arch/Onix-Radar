@@ -186,7 +186,9 @@ function DonutLegend({ slices, columns=1 }){
 function ConfigBadge({ pfMode, pfSims, allocCount }){
   const text = pfMode === 'equalweight'
     ? "EQUAL WEIGHT - " + (allocCount || "N") + " POS"
-    : "MARKOWITZ - " + (pfSims||0).toLocaleString() + " ITER.";
+    : pfMode === 'hrp'
+      ? "HRP - " + (allocCount || "N") + " POS"
+      : "MARKOWITZ - " + (pfSims||0).toLocaleString() + " ITER.";
   return (
     <div style={{fontSize:9,textTransform:"uppercase",letterSpacing:1.5,color:"var(--text-3)",fontWeight:600,fontFamily:"var(--font-mono)"}}>
       {text}
@@ -384,6 +386,7 @@ function ConfigCard(ctx){
             <option value="minvol">Min Varianza</option>
             <option value="maxret">Max Return</option>
             <option value="equalweight">Equal Weight</option>
+            <option value="hrp">HRP (paridad de riesgo jerárquica)</option>
           </select>
         </Field>
         <Field label="Stop-Loss">
@@ -543,6 +546,7 @@ function InfoBar({ portfolio, pfSims, pfStopType, scanDirection, S }){
                   : portfolio.mode==='minvol'    ? 'Min Varianza'
                   : portfolio.mode==='maxret'    ? 'Max Return'
                   : portfolio.mode==='equalweight' ? 'Equal Weight'
+                  : portfolio.mode==='hrp' ? 'HRP'
                   : portfolio.mode;
   const side = (portfolio.scanDirection || scanDirection || 'long').toLowerCase();
   const sideLabel = side === 'short' ? 'SHORT' : 'LONG';
@@ -919,6 +923,34 @@ function ExportBar({ portfolio, S }){
   );
 }
 
+// ── X-ray: avisos de concentración y diversificación ─────────────────────────
+function XrayCard({ portfolio, S }){
+  const checks=React.useMemo(()=>window.StockScannerCore.portfolioXray(portfolio),[portfolio]);
+  if(!checks.length) return null;
+  const warns=checks.filter(c=>c.level==='warn').length;
+  const tone={warn:'var(--amber)',ok:'var(--green)',info:'var(--text-2)'};
+  const icon={warn:'!',ok:'✓',info:'i'};
+  return (
+    <section aria-label="X-ray del portafolio" style={{...S.panel,padding:14,marginBottom:12}}>
+      <div style={{display:'flex',justifyContent:'space-between',alignItems:'baseline',gap:8,marginBottom:8,flexWrap:'wrap'}}>
+        <strong style={{fontSize:13}}>X-ray</strong>
+        <span style={{fontSize:11,color:warns?'var(--amber)':'var(--green)'}}>{warns?`${warns} aviso${warns>1?'s':''}`:'Sin avisos'}</span>
+      </div>
+      <div style={{display:'grid',gridTemplateColumns:'repeat(auto-fit,minmax(240px,1fr))',gap:8}}>
+        {checks.map(c=>(
+          <div key={c.id} style={{display:'flex',gap:8,alignItems:'flex-start',padding:'8px 10px',border:'1px solid var(--panel-soft-border)',borderRadius:6}}>
+            <span aria-hidden="true" style={{width:18,height:18,flex:'0 0 18px',borderRadius:9,display:'inline-flex',alignItems:'center',justifyContent:'center',fontSize:11,fontWeight:700,color:tone[c.level],border:`1px solid ${tone[c.level]}`}}>{icon[c.level]}</span>
+            <div style={{minWidth:0}}>
+              <div style={{fontSize:12,fontWeight:600,color:'var(--text-1)'}}>{c.title}</div>
+              <div style={{fontSize:11,color:'var(--text-2)',lineHeight:1.5}}>{c.detail}</div>
+            </div>
+          </div>
+        ))}
+      </div>
+    </section>
+  );
+}
+
 function PortfolioResults({ctx}){
   const [view,setView]=React.useState('overview');
   const {S,portfolio,pfSims,pfStopType,pfMaxWeight,pfRiskFree,scanDirection,setSelectedChart} = ctx;
@@ -927,6 +959,7 @@ function PortfolioResults({ctx}){
       <nav className="workspace-subnav" aria-label="Vistas del portafolio">{[['overview','Resumen'],['positions','Posiciones'],['correlation','Correlación']].map(([key,label])=><button type="button" key={key} aria-current={view===key?'page':undefined} onClick={()=>setView(key)}>{label}</button>)}</nav>
       <KpiRow portfolio={portfolio} pfRiskFree={pfRiskFree} S={S}/>
       {view==='overview'&&<InfoBar portfolio={portfolio} pfSims={pfSims} pfStopType={pfStopType} scanDirection={scanDirection} S={S}/>}
+      {view==='overview'&&<XrayCard portfolio={portfolio} S={S}/>}
 
       {/* Nivel 1 - Efficient Frontier + Unified Donut, same row, same height */}
       {view==='overview'&&<div className="ro-stack-mobile" style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:12,marginBottom:12}}>
@@ -999,7 +1032,7 @@ function PortfolioWorkspace({ctx}){
         <div style={{fontSize:10,color:'var(--text-2)'}}>Min por acción: <b style={{color:'var(--text-1)'}}>{formatPct(pfMinWeight)}</b></div>
         <div style={{fontSize:10,color:'var(--text-2)'}}>Max peso: <b style={{color:'var(--text-1)'}}>{formatPct(pfMaxWeight)}</b></div>
         <div style={{fontSize:10,color:'var(--text-2)'}}>Max posiciones: <b style={{color:'var(--text-1)'}}>{pfMaxPos}</b></div>
-        <div style={{fontSize:10,color:'var(--text-2)'}}>Modo: <b style={{color:'var(--text-1)'}}>{pfMode === 'minvol' ? 'Min Varianza' : pfMode === 'maxsharpe' ? 'Max Sharpe' : pfMode === 'maxret' ? 'Max Return' : 'Equal Weight'}</b></div>
+        <div style={{fontSize:10,color:'var(--text-2)'}}>Modo: <b style={{color:'var(--text-1)'}}>{pfMode === 'minvol' ? 'Min Varianza' : pfMode === 'maxsharpe' ? 'Max Sharpe' : pfMode === 'maxret' ? 'Max Return' : pfMode === 'hrp' ? 'HRP' : 'Equal Weight'}</b></div>
       </div>
 
       {false && <button onClick={buildPortfolio} disabled={pfBuilding||!canActuallyBuild}

@@ -41,6 +41,8 @@ Backtest con historial parcial: los valores con al menos 30 velas semanales part
 
 Indicadores verificados contra implementaciones de referencia independientes (`tests/indicatorReference.test.js`). La instalación de `trading-signals` como dependencia de desarrollo quedó pendiente de autorización.
 
+Mejora añadida: portafolio con modo HRP (Hierarchical Risk Parity de López de Prado: distancia de correlación, enlace simple, orden cuasi-diagonal y bisección recursiva por varianza; no invierte la covarianza) y tarjeta X-ray en Resumen con avisos de posición dominante (>25 %), tres mayores (>50 %), sector (>40 %), diversificación efectiva (<5 posiciones equivalentes), pares con correlación >0,8 y efectivo sin invertir.
+
 ## Alcance y comprobaciones
 
 Se revisaron la estructura, las entradas de la aplicación, los flujos de scanner/backtest/portafolio, la configuración de temporalidades, persistencia, servicios y cachés, rutas, compilación, pruebas e identidad visual. No es una certificación financiera ni una auditoría exhaustiva de cada interacción.
