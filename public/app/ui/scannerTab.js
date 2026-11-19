@@ -719,6 +719,38 @@ function TelegramActions({ ctx }){
   );
 }
 
+// ── Escáneres encadenados: las señales de un escaneo son el universo del siguiente ──
+function ScanChainBar({ ctx }){
+  const {S,scanChain,lastScan,chainRunning,chainResults,resetChain,rerunChain,results,passN,scanning,INDICATORS} = ctx;
+  const steps=scanChain?.steps||[];
+  const inChain=!!lastScan && steps.some(s=>s.scanId===lastScan.id);
+  const canAppend=!!lastScan && !inChain && passN>0 && !scanning && results.length>0;
+  if(!scanChain && !canAppend) return null;
+  const chip={display:'inline-flex',alignItems:'center',gap:6,padding:'4px 9px',border:'1px solid var(--panel-soft-border)',borderRadius:999,fontSize:11,color:'var(--text-1)',background:'var(--panel-soft-bg)'};
+  const arrow=<span aria-hidden="true" style={{color:'var(--text-3)'}}>→</span>;
+  const describe=s=>window.StockScannerCore.describeChainStep(s,INDICATORS||[]);
+  return (
+    <section className="scan-chain" aria-label="Escaneo encadenado" style={{...S.panel,padding:'10px 12px',marginBottom:10}}>
+      {scanChain&&<div style={{display:'flex',flexWrap:'wrap',alignItems:'center',gap:6,marginBottom:8}}>
+        <span style={{fontSize:10,fontWeight:700,color:'var(--text-3)',textTransform:'uppercase',letterSpacing:.8,marginRight:4}}>Cadena</span>
+        <span style={chip} title="Universo de partida">{`${scanChain.origin.label} · ${scanChain.origin.tickers.length}`}</span>
+        {steps.map((s,i)=><React.Fragment key={s.scanId}>{arrow}<span style={chip} title={describe(s)}>
+          <b>{`Paso ${i+1}`}</b><span style={{color:s.direction==='short'?'var(--purple)':'var(--green)'}}>{s.direction==='short'?'S':'L'}</span>{`${s.passed.length} de ${s.inputCount}`}
+        </span></React.Fragment>)}
+        {canAppend&&<>{arrow}<span style={{...chip,borderStyle:'dashed',color:'var(--text-2)'}}>{`Escaneo actual: ${passN}`}</span></>}
+      </div>}
+      {scanChain&&<div style={{fontSize:10,color:'var(--text-3)',marginBottom:8}}>{steps.map((s,i)=>`Paso ${i+1}: ${describe(s)}`).join('   |   ')}</div>}
+      <div style={{display:'flex',flexWrap:'wrap',gap:8,alignItems:'center'}}>
+        {canAppend&&<button type="button" style={S.ghostBtn} onClick={chainResults}>{scanChain?`Encadenar estas ${passN} señales`:`Escanear sobre estas ${passN} señales`}</button>}
+        {scanChain&&<button type="button" style={S.ghostBtn} onClick={rerunChain} disabled={scanning||chainRunning} aria-busy={chainRunning}>{chainRunning?'Repitiendo…':'Repetir cadena'}</button>}
+        {scanChain&&<button type="button" style={S.ghostBtn} onClick={resetChain} disabled={scanning||chainRunning}>Volver al universo original</button>}
+        {!scanChain&&<span style={{fontSize:10,color:'var(--text-3)'}}>Usa las señales como universo y aplica otros filtros encima.</span>}
+        {scanChain&&!canAppend&&!scanning&&<span style={{fontSize:10,color:'var(--text-3)'}}>{`Universo actual: las ${steps.at(-1)?.passed.length||0} señales del paso ${steps.length}. Cambia los filtros y escanea para añadir otro paso.`}</span>}
+      </div>
+    </section>
+  );
+}
+
 function ScannerTab({ ctx }){
   const {S,results,scanning,logLines,passN,buildPortfolio,pfBuilding,shown,errN,dataCacheRef} = ctx;
   const [configOpen, setConfigOpen] = useState(()=>{
@@ -769,6 +801,7 @@ function ScannerTab({ ctx }){
       {hasResults&&<div className="workspace-summary" aria-label="Resumen del escaneo">
         {[[results.length,'escaneadas','var(--text-1)'],[passN,'señales','var(--green)'],[results.length-passN-errN,'sin señal','var(--text-2)'],[errN,'errores','var(--amber)']].map(([n,label,color])=><span key={label}><strong style={{color}}>{n}</strong>{label}</span>)}
       </div>}
+      <ScanChainBar ctx={ctx}/>
       {hasResults&&!scanning&&<TelegramActions ctx={ctx}/>}
       {passN>=2&&<div className="portfolio-cta">
         <div><strong>{passN} señales para tu portafolio</strong><span>Construye una distribución a partir de las acciones que pasan tus filtros.</span></div>

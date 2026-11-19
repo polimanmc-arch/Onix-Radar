@@ -507,13 +507,90 @@ function App() {
         notify({ type: 'success', title: 'Preset eliminado', message: 'El preset de backtest fue eliminado.' });
     }, [selectedBtPresetId, notify]);
     // Main workflow callbacks
+    // Escáneres encadenados: cada escaneo guarda una foto de sus filtros y su universo.
+    const [scanChain, setScanChain] = useState(null);
+    const [lastScan, setLastScan] = useState(null);
+    const [chainRunning, setChainRunning] = useState(false);
+    const universeLabel = useCallback(() => {
+        var _a;
+        const presets = ((_a = window.StockScannerConfig) === null || _a === void 0 ? void 0 : _a.UNIVERSE_PRESETS) || {};
+        const names = (universeIds || []).map(id => { var _a, _b; return ((_a = presets[id]) === null || _a === void 0 ? void 0 : _a.label) || ((_b = (savedUniverseLists || []).find(l => 'LIST_' + l.id === id)) === null || _b === void 0 ? void 0 : _b.name) || id; });
+        return names.join(' + ') || 'Lista propia';
+    }, [universeIds, savedUniverseLists]);
     const runScan = useCallback(async () => {
+        // Foto del escaneo: filtros, dirección y universo tal como estaban al lanzarlo.
+        if (!scanning && tickers.length)
+            setLastScan({
+                ...window.StockScannerCore.scanSnapshot({ id: Date.now(), filters, shortFilters, direction: scanDirection, tickers }),
+                universe: { label: universeLabel(), universeIds: [...(universeIds || [])], tText },
+            });
         return runScanWorkflow({
             scanning, tickers, filters, shortFilters, scanDirection, conc, minHistoryYears,
             abortRef, setScanning, setResults, setSearch, setOnlyPass, setProg, setTab,
             dataCacheRef, addLog, fetchSectors, fetchQuotes, setSectorData,
         });
-    }, [scanning, tickers, filters, shortFilters, scanDirection, conc, minHistoryYears, fetchSectors, addLog]);
+    }, [scanning, tickers, filters, shortFilters, scanDirection, conc, minHistoryYears, fetchSectors, addLog, universeLabel, universeIds, tText]);
+    // Las señales del escaneo actual pasan a ser el universo del siguiente paso.
+    const chainResults = useCallback(() => {
+        try {
+            const { chain, nextTickers, restarted } = window.StockScannerCore.appendChainStep(scanChain, {
+                snapshot: lastScan, results,
+                origin: (lastScan === null || lastScan === void 0 ? void 0 : lastScan.universe) || { label: universeLabel(), universeIds: [...(universeIds || [])], tText },
+            });
+            setScanChain(chain);
+            setUniverseIds([]);
+            setTText(nextTickers.join(', '));
+            notify({ type: 'success', title: 'Escaneo encadenado', message: (restarted ? 'Nueva cadena. ' : '') + 'El universo ahora son las ' + nextTickers.length + ' señales del paso ' + chain.steps.length + '. Cambia los filtros y vuelve a escanear.' });
+        }
+        catch (e) {
+            notify({ type: 'warning', title: 'Encadenar', message: (e === null || e === void 0 ? void 0 : e.message) || 'No se pudo encadenar.' });
+        }
+    }, [scanChain, lastScan, results, universeLabel, universeIds, tText, setUniverseIds, setTText, notify]);
+    const resetChain = useCallback(() => {
+        if (scanChain === null || scanChain === void 0 ? void 0 : scanChain.origin) {
+            setUniverseIds(scanChain.origin.universeIds || []);
+            setTText(scanChain.origin.tText || '');
+        }
+        setScanChain(null);
+        setLastScan(null); // los resultados visibles son del universo encadenado, no del restaurado
+    }, [scanChain, setUniverseIds, setTText]);
+    // Repite todos los pasos desde el universo original con los filtros guardados en cada paso.
+    const rerunChain = useCallback(async () => {
+        if (!scanChain || scanning || chainRunning)
+            return;
+        setChainRunning(true);
+        let lastSnapshot = null;
+        try {
+            const out = await window.StockScannerCore.rerunScanChain(scanChain, async ({ tickers: stepTickers, filters: stepFilters, direction, index }) => {
+                var _a, _b;
+                let rows = [];
+                const long = direction !== 'short';
+                const snapshot = window.StockScannerCore.scanSnapshot({ id: Date.now() + index, filters: long ? stepFilters : [], shortFilters: long ? [] : stepFilters, direction, tickers: stepTickers });
+                await runScanWorkflow({
+                    scanning: false, tickers: stepTickers, filters: long ? stepFilters : filters, shortFilters: long ? shortFilters : stepFilters, scanDirection: direction, conc, minHistoryYears,
+                    abortRef, setScanning, setResults: r => { rows = r; setResults(r); }, setSearch, setOnlyPass, setProg, setTab,
+                    dataCacheRef, addLog, fetchSectors, fetchQuotes, setSectorData,
+                });
+                if ((_b = (_a = abortRef.current) === null || _a === void 0 ? void 0 : _a.signal) === null || _b === void 0 ? void 0 : _b.aborted)
+                    return null;
+                lastSnapshot = snapshot;
+                return rows.filter(r => r.passed && !r.err).map(r => r.ticker);
+            }, (i, n) => addLog('🔗 Paso ' + (i + 1) + ': ' + n + ' señales'));
+            if (out.cancelled) {
+                notify({ type: 'warning', title: 'Cadena', message: 'Se canceló la cadena.' });
+                return;
+            }
+            const steps = out.chain.steps.map((st, i) => i === out.chain.steps.length - 1 && lastSnapshot ? { ...st, scanId: lastSnapshot.id } : st);
+            setScanChain({ ...out.chain, steps });
+            setLastScan(lastSnapshot);
+            setUniverseIds([]);
+            setTText(out.nextTickers.join(', '));
+            notify({ type: out.stoppedEarly ? 'warning' : 'success', title: 'Cadena repetida', message: out.stoppedEarly ? 'Un paso se quedó sin señales: la cadena se detuvo ahí.' : 'Resultado final: ' + out.nextTickers.length + ' señales.' });
+        }
+        finally {
+            setChainRunning(false);
+        }
+    }, [scanChain, scanning, chainRunning, filters, shortFilters, conc, minHistoryYears, fetchSectors, addLog, notify, setUniverseIds, setTText]);
     const buildPortfolio = useCallback(async () => {
         try {
             const out = await buildPortfolioWorkflow({
@@ -893,6 +970,7 @@ function App() {
         tickers, tCount, passN, errN, sorted, shown, doSort, exportCSV,
         // Scanner actions
         pickPreset, fetchAllTickers, upF, rmF, stopScan, runScan, addLog,
+        scanChain, lastScan, chainRunning, chainResults, resetChain, rerunChain,
         saveFilterSetAction, loadFilterSetAction, deleteFilterSetAction,
         saveScannerPreset, loadScannerPreset, deleteScannerPreset,
         exportScannerPresets, importScannerPresets,

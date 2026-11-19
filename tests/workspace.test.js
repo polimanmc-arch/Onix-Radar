@@ -7,7 +7,7 @@ const React=require('react');
 const Renderer=require('react-test-renderer');
 const root=path.resolve(__dirname,'..');
 
-async function mountApp(){
+async function mountApp(options={}){
   const storage=new Map([['onix_scanner_config_open_v1','false']]);
   let element;
   const charts=[];
@@ -23,7 +23,7 @@ async function mountApp(){
   const document={getElementById:()=>({}),documentElement:{getAttribute:()=>null,setAttribute(){},removeAttribute(){}}};
   const ctx=vm.createContext({window,document,React,ReactDOM:{createRoot:()=>({render:e=>{element=e;}})},console,
     localStorage:{getItem:k=>storage.get(k)??null,setItem:(k,v)=>storage.set(k,String(v)),removeItem:k=>storage.delete(k)},
-    fetch:async()=>({ok:true,json:async()=>({chart:{result:[{timestamp:[1]}]},sectors:{},results:{}})}),
+    fetch:options.fetch||(async()=>({ok:true,json:async()=>({chart:{result:[{timestamp:[1]}]},sectors:{},results:{}})})),
     setTimeout,clearTimeout,AbortController,Date,performance,URL,Blob,navigator:{},
     LightweightCharts:window.LightweightCharts,ResizeObserver:class{observe(){} disconnect(){}},
     getComputedStyle:()=>({getPropertyValue:()=> '#171820'}),MutationObserver:class{observe(){} disconnect(){}}});
@@ -357,5 +357,43 @@ test('fundamental filters show "dato actual", use scan fundamentals in the inspe
   await Renderer.act(async()=>select.props.onChange({target:{value:'ROE'}}));
   assert.equal(window.scannerState.filters[0].ind,'ROE');
   assert.equal(window.scannerState.filters[0].ignoreMissing,false);
+  await Renderer.act(async()=>tree.unmount());
+});
+
+
+test('chained scans: use the signals as the next universe, show the funnel, repeat the chain and go back',async()=>{
+  // Precio fijo por ticker: A=150, B=110, C=50 (velas semanales y diarias).
+  const prices={A:150,B:110,C:50};
+  const fetch=async url=>{
+    const m=String(url).match(/\/api\/chart\/([^?]+)/);
+    const p=m?prices[decodeURIComponent(m[1])]:null;
+    if(!p) return {ok:true,json:async()=>({chart:{result:[]}})};
+    const n=80, timestamp=Array.from({length:n},(_,i)=>1700000000+i*604800), v=timestamp.map(()=>p);
+    return {ok:true,json:async()=>({chart:{result:[{timestamp,indicators:{quote:[{open:v,high:v,low:v,close:v,volume:v.map(()=>1000)}]}}]}})};
+  };
+  const {tree,window}=await mountApp({fetch});
+  const ctx=()=>tree.root.find(n=>n.type?.name==='ScannerTab').props.ctx;
+  const price=v=>[{_id:'p',ind:'PRICE',tf:'1wk',op:'>',cmpType:'val',cmpVal:v,params:{},cmpInd:'SMA',cmpParams:{p:20}}];
+  await Renderer.act(async()=>{ window.scannerState.setTText('A, B, C'); window.scannerState.setUniverseIds([]); window.scannerState.setFilters(price(100)); });
+  await Renderer.act(async()=>{ await ctx().runScan(); });
+  assert.equal(ctx().passN,2);
+  const button=label=>tree.root.find(n=>n.type==='button'&&String(n.children.join('')).startsWith(label));
+  await Renderer.act(async()=>button('Escanear sobre estas 2 señales').props.onClick());
+  assert.equal(window.scannerState.tText,'A, B');
+  await Renderer.act(async()=>window.scannerState.setFilters(price(120)));
+  await Renderer.act(async()=>{ await ctx().runScan(); });
+  assert.equal(ctx().passN,1);
+  await Renderer.act(async()=>button('Encadenar estas 1 señales').props.onClick());
+  assert.equal(window.scannerState.tText,'A');
+  const bar=()=>JSON.stringify(tree.toJSON());
+  assert.ok(bar().includes('Paso 1')&&bar().includes('2 de 3')&&bar().includes('1 de 2'),bar());
+  // Repetir la cadena desde el universo original con los filtros de cada paso (aunque ahora haya otros).
+  await Renderer.act(async()=>window.scannerState.setFilters(price(1000)));
+  await Renderer.act(async()=>{ await button('Repetir cadena').props.onClick(); });
+  assert.deepEqual(JSON.parse(JSON.stringify(ctx().results.filter(r=>r.passed).map(r=>r.ticker))),['A']);
+  assert.equal(window.scannerState.tText,'A');
+  await Renderer.act(async()=>button('Volver al universo original').props.onClick());
+  assert.equal(window.scannerState.tText,'A, B, C');
+  assert.equal(tree.root.findAllByProps({'aria-label':'Escaneo encadenado'}).length,0);
   await Renderer.act(async()=>tree.unmount());
 });

@@ -662,6 +662,39 @@ window.StockScannerTabs = window.StockScannerTabs || {};
                 React.createElement("div", { style: { marginTop: 6 } },
                     React.createElement("button", { type: "button", style: S.ghostBtn, onClick: copy }, "Copiar")))));
     }
+    // ── Escáneres encadenados: las señales de un escaneo son el universo del siguiente ──
+    function ScanChainBar({ ctx }) {
+        var _a;
+        const { S, scanChain, lastScan, chainRunning, chainResults, resetChain, rerunChain, results, passN, scanning, INDICATORS } = ctx;
+        const steps = (scanChain === null || scanChain === void 0 ? void 0 : scanChain.steps) || [];
+        const inChain = !!lastScan && steps.some(s => s.scanId === lastScan.id);
+        const canAppend = !!lastScan && !inChain && passN > 0 && !scanning && results.length > 0;
+        if (!scanChain && !canAppend)
+            return null;
+        const chip = { display: 'inline-flex', alignItems: 'center', gap: 6, padding: '4px 9px', border: '1px solid var(--panel-soft-border)', borderRadius: 999, fontSize: 11, color: 'var(--text-1)', background: 'var(--panel-soft-bg)' };
+        const arrow = React.createElement("span", { "aria-hidden": "true", style: { color: 'var(--text-3)' } }, "\u2192");
+        const describe = s => window.StockScannerCore.describeChainStep(s, INDICATORS || []);
+        return (React.createElement("section", { className: "scan-chain", "aria-label": "Escaneo encadenado", style: { ...S.panel, padding: '10px 12px', marginBottom: 10 } },
+            scanChain && React.createElement("div", { style: { display: 'flex', flexWrap: 'wrap', alignItems: 'center', gap: 6, marginBottom: 8 } },
+                React.createElement("span", { style: { fontSize: 10, fontWeight: 700, color: 'var(--text-3)', textTransform: 'uppercase', letterSpacing: .8, marginRight: 4 } }, "Cadena"),
+                React.createElement("span", { style: chip, title: "Universo de partida" }, `${scanChain.origin.label} · ${scanChain.origin.tickers.length}`),
+                steps.map((s, i) => React.createElement(React.Fragment, { key: s.scanId },
+                    arrow,
+                    React.createElement("span", { style: chip, title: describe(s) },
+                        React.createElement("b", null, `Paso ${i + 1}`),
+                        React.createElement("span", { style: { color: s.direction === 'short' ? 'var(--purple)' : 'var(--green)' } }, s.direction === 'short' ? 'S' : 'L'),
+                        `${s.passed.length} de ${s.inputCount}`))),
+                canAppend && React.createElement(React.Fragment, null,
+                    arrow,
+                    React.createElement("span", { style: { ...chip, borderStyle: 'dashed', color: 'var(--text-2)' } }, `Escaneo actual: ${passN}`))),
+            scanChain && React.createElement("div", { style: { fontSize: 10, color: 'var(--text-3)', marginBottom: 8 } }, steps.map((s, i) => `Paso ${i + 1}: ${describe(s)}`).join('   |   ')),
+            React.createElement("div", { style: { display: 'flex', flexWrap: 'wrap', gap: 8, alignItems: 'center' } },
+                canAppend && React.createElement("button", { type: "button", style: S.ghostBtn, onClick: chainResults }, scanChain ? `Encadenar estas ${passN} señales` : `Escanear sobre estas ${passN} señales`),
+                scanChain && React.createElement("button", { type: "button", style: S.ghostBtn, onClick: rerunChain, disabled: scanning || chainRunning, "aria-busy": chainRunning }, chainRunning ? 'Repitiendo…' : 'Repetir cadena'),
+                scanChain && React.createElement("button", { type: "button", style: S.ghostBtn, onClick: resetChain, disabled: scanning || chainRunning }, "Volver al universo original"),
+                !scanChain && React.createElement("span", { style: { fontSize: 10, color: 'var(--text-3)' } }, "Usa las se\u00F1ales como universo y aplica otros filtros encima."),
+                scanChain && !canAppend && !scanning && React.createElement("span", { style: { fontSize: 10, color: 'var(--text-3)' } }, `Universo actual: las ${((_a = steps.at(-1)) === null || _a === void 0 ? void 0 : _a.passed.length) || 0} señales del paso ${steps.length}. Cambia los filtros y escanea para añadir otro paso.`))));
+    }
     function ScannerTab({ ctx }) {
         const { S, results, scanning, logLines, passN, buildPortfolio, pfBuilding, shown, errN, dataCacheRef } = ctx;
         const [configOpen, setConfigOpen] = useState(() => {
@@ -716,6 +749,7 @@ window.StockScannerTabs = window.StockScannerTabs || {};
             hasResults && React.createElement("div", { className: "workspace-summary", "aria-label": "Resumen del escaneo" }, [[results.length, 'escaneadas', 'var(--text-1)'], [passN, 'señales', 'var(--green)'], [results.length - passN - errN, 'sin señal', 'var(--text-2)'], [errN, 'errores', 'var(--amber)']].map(([n, label, color]) => React.createElement("span", { key: label },
                 React.createElement("strong", { style: { color } }, n),
                 label))),
+            React.createElement(ScanChainBar, { ctx: ctx }),
             hasResults && !scanning && React.createElement(TelegramActions, { ctx: ctx }),
             passN >= 2 && React.createElement("div", { className: "portfolio-cta" },
                 React.createElement("div", null,
