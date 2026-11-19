@@ -135,14 +135,13 @@ window.StockScannerUI = window.StockScannerUI || {};
 
   // Gráfico de dona con leyenda: reparto del dinero por acción o por sector.
   const DONUT_COLORS = ['#5b8cff', '#2ec4a6', '#f5a623', '#e8577c', '#9b6dff', '#3fb8e6', '#8bc34a', '#ff7a45', '#d4b106', '#c06fd6', '#4dd0a0', '#ef6461'];
-  function Donut({ items, title, center, currency, wide }){
+  function Donut({ items, title, center, currency }){
     const R = 70, SW = 26, CIRC = 2 * Math.PI * R;
     const total = items.reduce((t, i) => t + i.weight, 0) || 1;
     let acc = 0;
     const slices = items.map((it, i) => { const frac = it.weight / total, sl = { ...it, frac, off: acc, color: it.color || DONUT_COLORS[i % DONUT_COLORS.length] }; acc += frac; return sl; });
     return (
-      <figure className={'simple-donut' + (wide ? ' wide' : '')}>
-        <h3>{title}</h3>
+      <figure className="simple-donut">
         <div className="simple-donut-body">
           <svg viewBox="0 0 200 200" role="img" aria-label={`${title}: ` + slices.map(sl => `${sl.label} ${pct(sl.weight, 1, false)}`).join(', ')}>
             <circle cx="100" cy="100" r={R} fill="none" stroke="var(--bg-3)" strokeWidth={SW}/>
@@ -170,6 +169,7 @@ window.StockScannerUI = window.StockScannerUI || {};
     const [strategyId, setStrategyId] = useState('base');
     const [tipOpen, setTipOpen] = useState(null);
     const [selTicker, setSelTicker] = useState(null);
+    const [weightView, setWeightView] = useState('stock');
     const [years, setYears] = useState(3);
     const [stage, setStage] = useState('idle');
     const [progress, setProgress] = useState('');
@@ -183,7 +183,7 @@ window.StockScannerUI = window.StockScannerUI || {};
 
     const market = markets.find(m => m.id === marketId);
     const group = groups.find(g => g.id === market?.group) || groups[0];
-    const countOf = m => C.simpleUniverseTickers(m).length;
+    const countOf = m => C.simpleUniverseReady(m) ? C.simpleUniverseTickers(m).length.toLocaleString('es-ES') : '≈' + (m.approx || 0).toLocaleString('es-ES');
     const strategy = strategies.find(s => s.id === strategyId);
     const period = periods.find(p => p.years === years) || periods[periods.length - 1];
     const running = stage !== 'idle' && stage !== 'done';
@@ -198,7 +198,8 @@ window.StockScannerUI = window.StockScannerUI || {};
       try{
         // 1. Escáner
         setStage('scan'); setProgress('Descargando precios semanales');
-        const tickers = C.simpleUniverseTickers(market);
+        if(!C.simpleUniverseReady(market)) setProgress('Descargando la lista de todas las acciones del mercado');
+        const tickers = await C.resolveSimpleUniverse(market);
         await C.loadSimpleWeekly({ tickers, cacheRef, signal: ac.signal, onProgress: (d, t) => setProgress(`Descargando precios ${d} de ${t}`) });
         const scan = C.scanSimpleMarket({ tickers, dataByTicker: cacheRef.current, strategy });
         setRun(r => ({ ...r, scan: { ...scan, total: tickers.length } }));
@@ -237,8 +238,8 @@ window.StockScannerUI = window.StockScannerUI || {};
 
     const stageState = id => {
       const order = STAGES.map(s => s.id), cur = order.indexOf(stage);
-      if(stage === 'done') return 'done';
-      if(stage === 'idle') return run && order.indexOf(id) < order.length ? (run[id] ? 'done' : 'todo') : 'todo';
+      if(run?.[id + 'Error']) return 'error';
+      if(stage === 'done' || stage === 'idle') return run?.[id] ? 'done' : 'todo';
       return order.indexOf(id) < cur ? 'done' : order.indexOf(id) === cur ? 'active' : 'todo';
     };
     const ranking = [...games].sort((a, b) => b.ret - a.ret).slice(0, 8);
@@ -247,6 +248,15 @@ window.StockScannerUI = window.StockScannerUI || {};
     const scan = run?.scan, pf = run?.portfolio, bt = run?.backtest;
     const inPortfolio = new Set((pf?.allocations || []).map(a => a.ticker));
     const selected = scan?.passing.some(r => r.ticker === selTicker) ? selTicker : scan?.passing[0]?.ticker;
+    const goTo = id => document.getElementById(id)?.scrollIntoView?.({ behavior: 'smooth', block: 'start' });
+    const done = id => stageState(id) === 'done';
+    const path = [
+      { id: 'market', n: 1, label: 'Mercado', state: market ? 'done' : 'todo', detail: market && `${market.icon} ${market.name}`, target: 'simple-step-market' },
+      { id: 'strategy', n: 2, label: 'Estrategia', state: strategy ? 'done' : 'todo', detail: strategy && `${strategy.icon} ${strategy.name}`, target: 'simple-step-strategy' },
+      { id: 'scan', n: 3, label: 'Escáner', state: stageState('scan'), detail: scan && `${scan.passing.length} de ${scan.analyzed} cumplen`, target: scan && 'simple-panel-scan' },
+      { id: 'portfolio', n: 4, label: 'Portafolio Markowitz', state: stageState('portfolio'), detail: pf ? `${pf.allocations.length} acciones` : run?.portfolioError && 'Sin portafolio', target: (pf || run?.portfolioError) && 'simple-panel-portfolio' },
+      { id: 'backtest', n: 5, label: 'Backtest', state: stageState('backtest'), detail: bt ? `${pct(bt.summary.ret)} · ${'★'.repeat(bt.summary.stars) || 'sin estrellas'}` : run?.backtestError && 'Sin resultado', target: (bt || run?.backtestError) && 'simple-panel-backtest' },
+    ];
     const fmtCol = (v, fmt) => fmt === 'pct' ? pct(v) : fmt === 'num' ? num(v, 1) : (v ?? '—');
 
     return (
@@ -256,9 +266,21 @@ window.StockScannerUI = window.StockScannerUI || {};
           <p>Del escáner al portafolio: elige un mercado y una estrategia y sigue el proceso completo con datos reales.</p>
         </section>
 
+        <ol className="simple-pipeline simple-path" aria-label="Camino del análisis">
+          {path.map(s => (
+            <li key={s.id} data-state={s.state}>
+              <button type="button" onClick={() => goTo(s.target)} disabled={!s.target} aria-label={`Paso ${s.n}: ${s.label}`}>
+                <span className="dot">{s.n}</span>
+                <span><b>{s.label}</b>{s.state === 'active'
+                  ? <small role="status">{progress || 'Trabajando…'}</small>
+                  : s.detail && <small>{s.detail}</small>}</span>
+              </button>
+            </li>))}
+        </ol>
+
         <div className="simple-setup">
           <section className="simple-step" aria-labelledby="simple-step-market">
-            <h2 id="simple-step-market"><span className="simple-step-n">A</span>Mercado</h2>
+            <h2 id="simple-step-market"><span className={'simple-step-n' + (market ? ' done' : '')}>1</span>Mercado</h2>
             <div className="simple-grid simple-grid-groups">
               {groups.map(g => (
                 <button type="button" key={g.id} className="simple-card compact" aria-pressed={g.id === group.id} disabled={running}
@@ -278,7 +300,7 @@ window.StockScannerUI = window.StockScannerUI || {};
             <p className="simple-note">{`Universo: ${countOf(market)} activos · comparado con comprar ${market.holdLabel}${market.heavy ? ' · la primera carga puede tardar 1-2 minutos' : ''}${market.note ? ' · ' + market.note : ''}`}</p>
           </section>
           <section className="simple-step" aria-labelledby="simple-step-strategy">
-            <h2 id="simple-step-strategy"><span className="simple-step-n">B</span>Estrategia</h2>
+            <h2 id="simple-step-strategy"><span className={'simple-step-n' + (strategy ? ' done' : '')}>2</span>Estrategia</h2>
             <div className="simple-grid simple-grid-3">
               {strategies.map(st => (
                 <div key={st.id} className="simple-card-wrap">
@@ -317,16 +339,8 @@ window.StockScannerUI = window.StockScannerUI || {};
         </div>
 
         {run && <div ref={sectionRef}>
-          <ol className="simple-pipeline" aria-label="Progreso del análisis">
-            {STAGES.map((s, i) => { const st = stageState(s.id); return (
-              <li key={s.id} data-state={st}>
-                <span className="dot">{st === 'done' ? '✓' : i + 1}</span>
-                <span><b>{s.label}</b>{st === 'active' && <small role="status">{progress || 'Trabajando…'}</small>}</span>
-              </li>); })}
-          </ol>
-
-          {scan && <section className="simple-panel" aria-label="Escáner">
-            <header><span className="simple-panel-n">1</span><div>
+          {scan && <section id="simple-panel-scan" className="simple-panel" aria-label="Escáner">
+            <header><span className={'simple-panel-n' + (done('scan') ? ' done' : '')}>3</span><div>
               <h2>Escáner · ¿qué acciones cumplen hoy la estrategia?</h2>
               <p>Se revisan todas las acciones del mercado con la última vela semanal cerrada y se quedan las que cumplen las reglas de compra.</p>
               <p className="simple-applied"><b>{`${run.strategy.icon} ${run.strategy.name}:`}</b> {run.strategy.rulesBuy.join(' · ')}</p>
@@ -358,9 +372,9 @@ window.StockScannerUI = window.StockScannerUI || {};
               : <p className="simple-note">Hoy ninguna acción del mercado cumple las reglas: la estrategia esperaría.</p>}
           </section>}
 
-          {run.portfolioError && <section className="simple-panel" aria-label="Portafolio"><header><span className="simple-panel-n">2</span><div><h2>Portafolio de Markowitz</h2><p>{run.portfolioError}</p></div></header></section>}
-          {pf && <section className="simple-panel" aria-label="Portafolio de Markowitz">
-            <header><span className="simple-panel-n">2</span><div>
+          {run.portfolioError && <section id="simple-panel-portfolio" className="simple-panel" aria-label="Portafolio"><header><span className="simple-panel-n error">4</span><div><h2>Portafolio de Markowitz</h2><p>{run.portfolioError}</p></div></header></section>}
+          {pf && <section id="simple-panel-portfolio" className="simple-panel" aria-label="Portafolio de Markowitz">
+            <header><span className={'simple-panel-n' + (done('portfolio') ? ' done' : '')}>4</span><div>
               <h2>Portafolio de Markowitz · ¿cuánto invertir en cada acción?</h2>
               <p>El optimizador prueba miles de combinaciones de pesos con las rentabilidades y correlaciones históricas y elige la de máximo Sharpe: la mejor rentabilidad por unidad de riesgo. Máximo 10 acciones y 25 % por acción.</p>
             </div></header>
@@ -372,21 +386,31 @@ window.StockScannerUI = window.StockScannerUI || {};
             </div>
             <div className="simple-portfolio-grid">
               <FrontierChart portfolio={pf}/>
-              <Donut title="Peso por acción" currency={cur} center={{ value: String(pf.allocations.length), label: 'acciones' }} items={(() => {
-                  const items = pf.allocations.map(a => ({ key: a.ticker, label: a.ticker, sub: a.shortName && a.shortName !== a.ticker ? a.shortName : sectorEs(a.sector), weight: Math.abs(a.weight) }));
-                  const cash = 1 - items.reduce((t, i) => t + i.weight, 0);
-                  // Con pocas acciones, el límite de 25 % por acción deja parte en efectivo.
-                  if(cash > 0.01) items.push({ key: 'cash', label: 'Efectivo', sub: 'límite de 25 % por acción', weight: cash, color: 'var(--text-3)' });
-                  return items;
-                })()}/>
-                <Donut wide title="Peso por sector" currency={cur} center={{ value: String((pf.sectors || []).length), label: 'sectores' }}
-                  items={(pf.sectors || []).map(sc => ({ key: sc.name, label: sectorEs(sc.name), sub: `${sc.count} acción${sc.count > 1 ? 'es' : ''}`, weight: sc.weight }))}/>
+              <div className="simple-weights">
+                <div className="simple-weights-head">
+                  <h3>Reparto del dinero</h3>
+                  <div className="simple-switch" role="group" aria-label="Ver el reparto">
+                    <button type="button" aria-pressed={weightView === 'stock'} onClick={() => setWeightView('stock')}>Por acción</button>
+                    <button type="button" aria-pressed={weightView === 'sector'} onClick={() => setWeightView('sector')}>Por sector</button>
+                  </div>
+                </div>
+                {weightView === 'stock'
+                  ? <Donut key="stock" title="Peso por acción" currency={cur} center={{ value: String(pf.allocations.length), label: 'acciones' }} items={(() => {
+                      const items = pf.allocations.map(a => ({ key: a.ticker, label: a.ticker, sub: a.shortName && a.shortName !== a.ticker ? a.shortName : sectorEs(a.sector), weight: Math.abs(a.weight) }));
+                      const cash = 1 - items.reduce((t, i) => t + i.weight, 0);
+                      // Con pocas acciones, el límite de 25 % por acción deja parte en efectivo.
+                      if(cash > 0.01) items.push({ key: 'cash', label: 'Efectivo', sub: 'límite de 25 % por acción', weight: cash, color: 'var(--text-3)' });
+                      return items;
+                    })()}/>
+                  : <Donut key="sector" title="Peso por sector" currency={cur} center={{ value: String((pf.sectors || []).length), label: 'sectores' }}
+                      items={(pf.sectors || []).map(sc => ({ key: sc.name, label: sectorEs(sc.name), sub: `${sc.count} acción${sc.count > 1 ? 'es' : ''}`, weight: sc.weight }))}/>}
+              </div>
             </div>
           </section>}
 
-          {run.backtestError && <section className="simple-panel" aria-label="Backtest"><header><span className="simple-panel-n">3</span><div><h2>Backtest</h2><p>{run.backtestError}</p></div></header></section>}
-          {bt && <section className="simple-panel simple-result" aria-label="Resultado del backtest">
-            <header><span className="simple-panel-n">3</span><div>
+          {run.backtestError && <section id="simple-panel-backtest" className="simple-panel" aria-label="Backtest"><header><span className="simple-panel-n error">5</span><div><h2>Backtest</h2><p>{run.backtestError}</p></div></header></section>}
+          {bt && <section id="simple-panel-backtest" className="simple-panel simple-result" aria-label="Resultado del backtest">
+            <header><span className={'simple-panel-n' + (done('backtest') ? ' done' : '')}>5</span><div>
               <h2>Backtest · ¿habría funcionado en el pasado?</h2>
               <p>{`La estrategia se aplica semana a semana desde ${monthYear(bt.summary.start)} con 10.000 ${cur}: compra cuando se cumplen las reglas, vende cuando se cumplen las de salida, reparte el dinero según rentabilidad/riesgo y descuenta comisiones.`}</p>
             </div></header>

@@ -148,7 +148,7 @@
         const cache=getSeriesCache(d);
         if(cache.has(key)) return cache.get(key);
         const series=buildSeries(d,ind,params);
-        if(series) cache.set(key,series);
+        cache.set(key,series); // también null: evita reconstruir en cada evaluación
         return series;
       };
       const avgRangeAt=(d,idx,n)=>{

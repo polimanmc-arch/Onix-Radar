@@ -334,3 +334,35 @@ body,[data-theme="light"] body{background:var(--bg-0);background-image:none}
 .simple-donut.wide{grid-column:1/-1;padding-top:14px;border-top:1px solid var(--border)}
 .simple-portfolio-grid{row-gap:22px}
 .simple-donut.wide .simple-donut-legend{grid-template-columns:repeat(auto-fill,minmax(190px,230px));column-gap:28px}
+
+/* ── Modo simple: una sola dona con selector por acción / por sector ─── */
+.simple-weights-head{display:flex;align-items:center;justify-content:space-between;gap:12px;margin-bottom:12px;flex-wrap:wrap}
+.simple-weights-head h3{font-size:14px;margin:0;color:var(--text-0)}
+.simple-switch{display:inline-flex;padding:3px;border-radius:999px;background:var(--bg-2);border:1px solid var(--border)}
+.simple-switch button{border:0;background:transparent;color:var(--text-2);padding:6px 14px;border-radius:999px;font:600 13px var(--font-body);cursor:pointer}
+.simple-switch button[aria-pressed="true"]{background:var(--accent);color:#fff}
+.simple-switch button:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
+.simple-weights .simple-donut-legend{grid-template-columns:minmax(0,1fr)}
+
+/* ── Modo simple: camino 1-5 fijo arriba; cada paso se pone en verde al estar listo ─── */
+.simple-path{position:sticky;top:0;z-index:30;margin:18px 0 0;padding:10px 0;background:var(--bg-0);flex-wrap:nowrap}
+.simple-path li{flex:1 1 0;min-width:0;padding:0;border:0;background:none}
+.simple-path li>button{display:flex;align-items:center;gap:10px;width:100%;height:100%;padding:10px 12px;border:1px solid var(--border);border-radius:12px;background:var(--bg-1);color:var(--text-2);text-align:left;font:inherit;cursor:pointer}
+.simple-path li>button:disabled{cursor:default}
+.simple-path li>button:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
+.simple-path li>button>span:last-child{min-width:0}
+.simple-path li small{white-space:nowrap;overflow:hidden;text-overflow:ellipsis;color:var(--text-2)}
+.simple-path li[data-state="done"]>button{border-color:var(--green)}
+.simple-path li[data-state="done"] small{color:var(--green)}
+.simple-path li[data-state="active"]>button{border-color:var(--accent)}
+.simple-path li[data-state="active"] small{color:var(--accent)}
+.simple-path li[data-state="error"]>button{border-color:var(--red,#e5484d)}
+.simple-path li[data-state="error"] .dot{background:var(--red,#e5484d);color:#fff}
+.simple-path li[data-state="active"] .dot{background:var(--accent);color:#fff;animation:simple-pulse 1.2s ease-in-out infinite}
+.simple-path li[data-state="done"] .dot{background:var(--green);color:#10131a}
+.simple-step-n,.simple-panel-n{transition:background .25s,color .25s}
+.simple-step-n.done,.simple-panel-n.done{background:var(--green);color:#10131a}
+.simple-panel-n.error{background:var(--red,#e5484d)}
+.simple-panel,.simple-step{scroll-margin-top:96px}
+@media(max-width:900px){.simple-path{flex-wrap:wrap}.simple-path li{flex:1 1 30%}}
+@media(max-width:600px){.simple-path{position:static}.simple-path li{flex:1 1 45%}}

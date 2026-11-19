@@ -41,6 +41,10 @@
     { id: 'global', icon: '🌍', name: 'Universo completo', blurb: 'Todas las acciones o todos los activos a la vez', options: [
       { id: 'ALL_INDEX_COMPANIES', preset: 'ALL_INDEX_COMPANIES', name: 'Todas las acciones', benchmark: 'ACWI', holdLabel: 'el mundo (ACWI)', currency: '$', heavy: true },
       { id: 'GLOBAL_FULL_UNIVERSE', preset: 'GLOBAL_FULL_UNIVERSE', name: 'Todos los activos', benchmark: 'ACWI', holdLabel: 'el mundo (ACWI)', currency: '$', heavy: true },
+      // Igual que "Todo US (Auto)" + "Universo completo" del modo experto: todas las acciones de NYSE, Nasdaq y AMEX
+      // (lista del Nasdaq, unas 6.000) más Europa, índices, materias primas y bonos.
+      { id: 'MARKET_ALL', dynamic: 'allUs', approx: 7000, name: 'Todo el mercado', benchmark: 'ACWI', holdLabel: 'el mundo (ACWI)', currency: '$', heavy: true, exclude: YIELDS,
+        note: 'todas las acciones de NYSE, Nasdaq y AMEX + Europa, índices, materias primas y bonos' },
     ]},
   ];
   const MARKETS = MARKET_GROUPS.flatMap(g => g.options.map(o => ({ ...o, group: g.id, icon: g.icon })));
@@ -115,10 +119,26 @@
   const CAPITAL = 10000;
 
   const withIds = list => list.map((x, i) => ({ _id: 'simple_' + i + '_' + x.ind, ...JSON.parse(JSON.stringify(x)) }));
+  // Listas que se descargan del servidor (todo el mercado de EE. UU.), una vez por sesión.
+  const dynamicLists = {};
+  const uniqList = arr => [...new Set((arr || []).filter(Boolean))];
   const universeTickers = market => {
-    const list = market.tickers || window.StockScannerConfig?.UNIVERSE_PRESETS?.[market.preset]?.tickers || [];
+    const cfg = window.StockScannerConfig || {};
+    const list = dynamicLists[market.id] || market.tickers || cfg.UNIVERSE_PRESETS?.[market.preset]?.tickers
+      || (market.dynamic ? uniqList([...(cfg.ALL_INDEX_COMPANIES || []), ...(cfg.MACRO_ASSETS || [])]) : []);
     return market.exclude ? list.filter(t => !market.exclude.includes(t)) : list;
   };
+  const universeReady = market => !market.dynamic || !!dynamicLists[market.id];
+  async function resolveUniverse(market, fetchImpl = (u, o) => fetch(u, o)){
+    if(market.dynamic === 'allUs' && !dynamicLists[market.id]){
+      const cfg = window.StockScannerConfig || {};
+      const json = await fetchImpl('/api/tickers').then(r => r.json()).catch(() => ({}));
+      const allUs = Array.isArray(json?.tickers) ? json.tickers.map(t => String(t).toUpperCase()).filter(Boolean) : [];
+      if(!allUs.length) throw new Error('No se pudo descargar la lista de todas las acciones del mercado. Inténtalo de nuevo.');
+      dynamicLists[market.id] = uniqList([...(cfg.ALL_INDEX_COMPANIES || []), ...allUs, ...(cfg.MACRO_ASSETS || [])]);
+    }
+    return universeTickers(market);
+  }
   // Lista explícita cuando el universo es propio, tiene exclusiones o es enorme: así el backtest usa
   // exactamente los mismos activos que el escáner (el preset "Universo completo" del modo experto
   // añade además todas las acciones de EE. UU. del Nasdaq).
@@ -275,7 +295,7 @@
   window.StockScannerCore = Object.assign(window.StockScannerCore || {}, {
     loadSimpleWeekly: loadWeekly, scanSimpleMarket: scanMarket, buildSimplePortfolioOptions, SIMPLE_CANDIDATES: CANDIDATES,
     todaySimpleSignals: todaySignals,
-    SIMPLE_MARKETS: MARKETS, SIMPLE_MARKET_GROUPS: MARKET_GROUPS, SIMPLE_PROCESS_METRICS: PROCESS_METRICS, simpleUniverseTickers: universeTickers, SIMPLE_STRATEGIES: STRATEGIES, SIMPLE_PERIODS: PERIODS, SIMPLE_CAPITAL: CAPITAL,
+    SIMPLE_MARKETS: MARKETS, SIMPLE_MARKET_GROUPS: MARKET_GROUPS, SIMPLE_PROCESS_METRICS: PROCESS_METRICS, simpleUniverseTickers: universeTickers, resolveSimpleUniverse: resolveUniverse, simpleUniverseReady: universeReady, SIMPLE_STRATEGIES: STRATEGIES, SIMPLE_PERIODS: PERIODS, SIMPLE_CAPITAL: CAPITAL,
     buildSimpleBacktestOptions, summarizeSimpleResult,
   });
 })();

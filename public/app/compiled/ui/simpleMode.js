@@ -152,13 +152,12 @@ window.StockScannerUI = window.StockScannerUI || {};
     }
     // Gráfico de dona con leyenda: reparto del dinero por acción o por sector.
     const DONUT_COLORS = ['#5b8cff', '#2ec4a6', '#f5a623', '#e8577c', '#9b6dff', '#3fb8e6', '#8bc34a', '#ff7a45', '#d4b106', '#c06fd6', '#4dd0a0', '#ef6461'];
-    function Donut({ items, title, center, currency, wide }) {
+    function Donut({ items, title, center, currency }) {
         const R = 70, SW = 26, CIRC = 2 * Math.PI * R;
         const total = items.reduce((t, i) => t + i.weight, 0) || 1;
         let acc = 0;
         const slices = items.map((it, i) => { const frac = it.weight / total, sl = { ...it, frac, off: acc, color: it.color || DONUT_COLORS[i % DONUT_COLORS.length] }; acc += frac; return sl; });
-        return (React.createElement("figure", { className: 'simple-donut' + (wide ? ' wide' : '') },
-            React.createElement("h3", null, title),
+        return (React.createElement("figure", { className: "simple-donut" },
             React.createElement("div", { className: "simple-donut-body" },
                 React.createElement("svg", { viewBox: "0 0 200 200", role: "img", "aria-label": `${title}: ` + slices.map(sl => `${sl.label} ${pct(sl.weight, 1, false)}`).join(', ') },
                     React.createElement("circle", { cx: "100", cy: "100", r: R, fill: "none", stroke: "var(--bg-3)", strokeWidth: SW }),
@@ -184,6 +183,7 @@ window.StockScannerUI = window.StockScannerUI || {};
         const [strategyId, setStrategyId] = useState('base');
         const [tipOpen, setTipOpen] = useState(null);
         const [selTicker, setSelTicker] = useState(null);
+        const [weightView, setWeightView] = useState('stock');
         const [years, setYears] = useState(3);
         const [stage, setStage] = useState('idle');
         const [progress, setProgress] = useState('');
@@ -196,7 +196,7 @@ window.StockScannerUI = window.StockScannerUI || {};
         useEffect(() => () => { var _a; return (_a = abortRef.current) === null || _a === void 0 ? void 0 : _a.abort(); }, []);
         const market = markets.find(m => m.id === marketId);
         const group = groups.find(g => g.id === (market === null || market === void 0 ? void 0 : market.group)) || groups[0];
-        const countOf = m => C.simpleUniverseTickers(m).length;
+        const countOf = m => C.simpleUniverseReady(m) ? C.simpleUniverseTickers(m).length.toLocaleString('es-ES') : '≈' + (m.approx || 0).toLocaleString('es-ES');
         const strategy = strategies.find(s => s.id === strategyId);
         const period = periods.find(p => p.years === years) || periods[periods.length - 1];
         const running = stage !== 'idle' && stage !== 'done';
@@ -215,7 +215,9 @@ window.StockScannerUI = window.StockScannerUI || {};
                 // 1. Escáner
                 setStage('scan');
                 setProgress('Descargando precios semanales');
-                const tickers = C.simpleUniverseTickers(market);
+                if (!C.simpleUniverseReady(market))
+                    setProgress('Descargando la lista de todas las acciones del mercado');
+                const tickers = await C.resolveSimpleUniverse(market);
                 await C.loadSimpleWeekly({ tickers, cacheRef, signal: ac.signal, onProgress: (d, t) => setProgress(`Descargando precios ${d} de ${t}`) });
                 const scan = C.scanSimpleMarket({ tickers, dataByTicker: cacheRef.current, strategy });
                 setRun(r => ({ ...r, scan: { ...scan, total: tickers.length } }));
@@ -267,10 +269,10 @@ window.StockScannerUI = window.StockScannerUI || {};
         };
         const stageState = id => {
             const order = STAGES.map(s => s.id), cur = order.indexOf(stage);
-            if (stage === 'done')
-                return 'done';
-            if (stage === 'idle')
-                return run && order.indexOf(id) < order.length ? (run[id] ? 'done' : 'todo') : 'todo';
+            if (run === null || run === void 0 ? void 0 : run[id + 'Error'])
+                return 'error';
+            if (stage === 'done' || stage === 'idle')
+                return (run === null || run === void 0 ? void 0 : run[id]) ? 'done' : 'todo';
             return order.indexOf(id) < cur ? 'done' : order.indexOf(id) === cur ? 'active' : 'todo';
         };
         const ranking = [...games].sort((a, b) => b.ret - a.ret).slice(0, 8);
@@ -279,15 +281,32 @@ window.StockScannerUI = window.StockScannerUI || {};
         const scan = run === null || run === void 0 ? void 0 : run.scan, pf = run === null || run === void 0 ? void 0 : run.portfolio, bt = run === null || run === void 0 ? void 0 : run.backtest;
         const inPortfolio = new Set(((pf === null || pf === void 0 ? void 0 : pf.allocations) || []).map(a => a.ticker));
         const selected = (scan === null || scan === void 0 ? void 0 : scan.passing.some(r => r.ticker === selTicker)) ? selTicker : (_b = scan === null || scan === void 0 ? void 0 : scan.passing[0]) === null || _b === void 0 ? void 0 : _b.ticker;
+        const goTo = id => { var _a, _b; return (_b = (_a = document.getElementById(id)) === null || _a === void 0 ? void 0 : _a.scrollIntoView) === null || _b === void 0 ? void 0 : _b.call(_a, { behavior: 'smooth', block: 'start' }); };
+        const done = id => stageState(id) === 'done';
+        const path = [
+            { id: 'market', n: 1, label: 'Mercado', state: market ? 'done' : 'todo', detail: market && `${market.icon} ${market.name}`, target: 'simple-step-market' },
+            { id: 'strategy', n: 2, label: 'Estrategia', state: strategy ? 'done' : 'todo', detail: strategy && `${strategy.icon} ${strategy.name}`, target: 'simple-step-strategy' },
+            { id: 'scan', n: 3, label: 'Escáner', state: stageState('scan'), detail: scan && `${scan.passing.length} de ${scan.analyzed} cumplen`, target: scan && 'simple-panel-scan' },
+            { id: 'portfolio', n: 4, label: 'Portafolio Markowitz', state: stageState('portfolio'), detail: pf ? `${pf.allocations.length} acciones` : (run === null || run === void 0 ? void 0 : run.portfolioError) && 'Sin portafolio', target: (pf || (run === null || run === void 0 ? void 0 : run.portfolioError)) && 'simple-panel-portfolio' },
+            { id: 'backtest', n: 5, label: 'Backtest', state: stageState('backtest'), detail: bt ? `${pct(bt.summary.ret)} · ${'★'.repeat(bt.summary.stars) || 'sin estrellas'}` : (run === null || run === void 0 ? void 0 : run.backtestError) && 'Sin resultado', target: (bt || (run === null || run === void 0 ? void 0 : run.backtestError)) && 'simple-panel-backtest' },
+        ];
         const fmtCol = (v, fmt) => fmt === 'pct' ? pct(v) : fmt === 'num' ? num(v, 1) : (v !== null && v !== void 0 ? v : '—');
         return (React.createElement("div", { className: "simple-mode" },
             React.createElement("section", { className: "simple-hero" },
                 React.createElement("h1", null, "Radar Onix \u00B7 Simulador de inversi\u00F3n"),
                 React.createElement("p", null, "Del esc\u00E1ner al portafolio: elige un mercado y una estrategia y sigue el proceso completo con datos reales.")),
+            React.createElement("ol", { className: "simple-pipeline simple-path", "aria-label": "Camino del an\u00E1lisis" }, path.map(s => (React.createElement("li", { key: s.id, "data-state": s.state },
+                React.createElement("button", { type: "button", onClick: () => goTo(s.target), disabled: !s.target, "aria-label": `Paso ${s.n}: ${s.label}` },
+                    React.createElement("span", { className: "dot" }, s.n),
+                    React.createElement("span", null,
+                        React.createElement("b", null, s.label),
+                        s.state === 'active'
+                            ? React.createElement("small", { role: "status" }, progress || 'Trabajando…')
+                            : s.detail && React.createElement("small", null, s.detail))))))),
             React.createElement("div", { className: "simple-setup" },
                 React.createElement("section", { className: "simple-step", "aria-labelledby": "simple-step-market" },
                     React.createElement("h2", { id: "simple-step-market" },
-                        React.createElement("span", { className: "simple-step-n" }, "A"),
+                        React.createElement("span", { className: 'simple-step-n' + (market ? ' done' : '') }, "1"),
                         "Mercado"),
                     React.createElement("div", { className: "simple-grid simple-grid-groups" }, groups.map(g => (React.createElement("button", { type: "button", key: g.id, className: "simple-card compact", "aria-pressed": g.id === group.id, disabled: running, onClick: () => { if (g.id !== group.id)
                             setMarketId(g.options[0].id); } },
@@ -300,7 +319,7 @@ window.StockScannerUI = window.StockScannerUI || {};
                     React.createElement("p", { className: "simple-note" }, `Universo: ${countOf(market)} activos · comparado con comprar ${market.holdLabel}${market.heavy ? ' · la primera carga puede tardar 1-2 minutos' : ''}${market.note ? ' · ' + market.note : ''}`)),
                 React.createElement("section", { className: "simple-step", "aria-labelledby": "simple-step-strategy" },
                     React.createElement("h2", { id: "simple-step-strategy" },
-                        React.createElement("span", { className: "simple-step-n" }, "B"),
+                        React.createElement("span", { className: 'simple-step-n' + (strategy ? ' done' : '') }, "2"),
                         "Estrategia"),
                     React.createElement("div", { className: "simple-grid simple-grid-3" }, strategies.map(st => (React.createElement("div", { key: st.id, className: "simple-card-wrap" },
                         React.createElement("button", { type: "button", className: "simple-card simple-card-strategy", "aria-pressed": st.id === strategyId, onClick: () => setStrategyId(st.id), disabled: running },
@@ -349,17 +368,9 @@ window.StockScannerUI = window.StockScannerUI || {};
                     running && React.createElement("button", { type: "button", className: "simple-link", onClick: () => { var _a; return (_a = abortRef.current) === null || _a === void 0 ? void 0 : _a.abort(); } }, "Cancelar")),
                 error && React.createElement("div", { className: "simple-error", role: "alert" }, error)),
             run && React.createElement("div", { ref: sectionRef },
-                React.createElement("ol", { className: "simple-pipeline", "aria-label": "Progreso del an\u00E1lisis" }, STAGES.map((s, i) => {
-                    const st = stageState(s.id);
-                    return (React.createElement("li", { key: s.id, "data-state": st },
-                        React.createElement("span", { className: "dot" }, st === 'done' ? '✓' : i + 1),
-                        React.createElement("span", null,
-                            React.createElement("b", null, s.label),
-                            st === 'active' && React.createElement("small", { role: "status" }, progress || 'Trabajando…'))));
-                })),
-                scan && React.createElement("section", { className: "simple-panel", "aria-label": "Esc\u00E1ner" },
+                scan && React.createElement("section", { id: "simple-panel-scan", className: "simple-panel", "aria-label": "Esc\u00E1ner" },
                     React.createElement("header", null,
-                        React.createElement("span", { className: "simple-panel-n" }, "1"),
+                        React.createElement("span", { className: 'simple-panel-n' + (done('scan') ? ' done' : '') }, "3"),
                         React.createElement("div", null,
                             React.createElement("h2", null, "Esc\u00E1ner \u00B7 \u00BFqu\u00E9 acciones cumplen hoy la estrategia?"),
                             React.createElement("p", null, "Se revisan todas las acciones del mercado con la \u00FAltima vela semanal cerrada y se quedan las que cumplen las reglas de compra."),
@@ -404,15 +415,15 @@ window.StockScannerUI = window.StockScannerUI || {};
                             React.createElement("p", { className: "simple-note" }, `Haz clic en una fila para ver su gráfico.${scan.passing.length > 12 ? ` Y ${scan.passing.length - 12} acciones más.` : ''} Las ${Math.min(scan.passing.length, C.SIMPLE_CANDIDATES)} con mejor Sharpe del último año pasan al optimizador.`)),
                         selected && React.createElement(SimpleCandles, { ticker: selected, data: (_c = cacheRef.current[selected]) === null || _c === void 0 ? void 0 : _c['1wk'], strategy: run.strategy, currency: cur, row: scan.passing.find(r => r.ticker === selected) }))
                         : React.createElement("p", { className: "simple-note" }, "Hoy ninguna acci\u00F3n del mercado cumple las reglas: la estrategia esperar\u00EDa.")),
-                run.portfolioError && React.createElement("section", { className: "simple-panel", "aria-label": "Portafolio" },
+                run.portfolioError && React.createElement("section", { id: "simple-panel-portfolio", className: "simple-panel", "aria-label": "Portafolio" },
                     React.createElement("header", null,
-                        React.createElement("span", { className: "simple-panel-n" }, "2"),
+                        React.createElement("span", { className: "simple-panel-n error" }, "4"),
                         React.createElement("div", null,
                             React.createElement("h2", null, "Portafolio de Markowitz"),
                             React.createElement("p", null, run.portfolioError)))),
-                pf && React.createElement("section", { className: "simple-panel", "aria-label": "Portafolio de Markowitz" },
+                pf && React.createElement("section", { id: "simple-panel-portfolio", className: "simple-panel", "aria-label": "Portafolio de Markowitz" },
                     React.createElement("header", null,
-                        React.createElement("span", { className: "simple-panel-n" }, "2"),
+                        React.createElement("span", { className: 'simple-panel-n' + (done('portfolio') ? ' done' : '') }, "4"),
                         React.createElement("div", null,
                             React.createElement("h2", null, "Portafolio de Markowitz \u00B7 \u00BFcu\u00E1nto invertir en cada acci\u00F3n?"),
                             React.createElement("p", null, "El optimizador prueba miles de combinaciones de pesos con las rentabilidades y correlaciones hist\u00F3ricas y elige la de m\u00E1ximo Sharpe: la mejor rentabilidad por unidad de riesgo. M\u00E1ximo 10 acciones y 25 % por acci\u00F3n."))),
@@ -435,24 +446,31 @@ window.StockScannerUI = window.StockScannerUI || {};
                             React.createElement("small", null, `de ${Math.min((scan === null || scan === void 0 ? void 0 : scan.passing.length) || 0, C.SIMPLE_CANDIDATES)} candidatas`))),
                     React.createElement("div", { className: "simple-portfolio-grid" },
                         React.createElement(FrontierChart, { portfolio: pf }),
-                        React.createElement(Donut, { title: "Peso por acci\u00F3n", currency: cur, center: { value: String(pf.allocations.length), label: 'acciones' }, items: (() => {
-                                const items = pf.allocations.map(a => ({ key: a.ticker, label: a.ticker, sub: a.shortName && a.shortName !== a.ticker ? a.shortName : sectorEs(a.sector), weight: Math.abs(a.weight) }));
-                                const cash = 1 - items.reduce((t, i) => t + i.weight, 0);
-                                // Con pocas acciones, el límite de 25 % por acción deja parte en efectivo.
-                                if (cash > 0.01)
-                                    items.push({ key: 'cash', label: 'Efectivo', sub: 'límite de 25 % por acción', weight: cash, color: 'var(--text-3)' });
-                                return items;
-                            })() }),
-                        React.createElement(Donut, { wide: true, title: "Peso por sector", currency: cur, center: { value: String((pf.sectors || []).length), label: 'sectores' }, items: (pf.sectors || []).map(sc => ({ key: sc.name, label: sectorEs(sc.name), sub: `${sc.count} acción${sc.count > 1 ? 'es' : ''}`, weight: sc.weight })) }))),
-                run.backtestError && React.createElement("section", { className: "simple-panel", "aria-label": "Backtest" },
+                        React.createElement("div", { className: "simple-weights" },
+                            React.createElement("div", { className: "simple-weights-head" },
+                                React.createElement("h3", null, "Reparto del dinero"),
+                                React.createElement("div", { className: "simple-switch", role: "group", "aria-label": "Ver el reparto" },
+                                    React.createElement("button", { type: "button", "aria-pressed": weightView === 'stock', onClick: () => setWeightView('stock') }, "Por acci\u00F3n"),
+                                    React.createElement("button", { type: "button", "aria-pressed": weightView === 'sector', onClick: () => setWeightView('sector') }, "Por sector"))),
+                            weightView === 'stock'
+                                ? React.createElement(Donut, { key: "stock", title: "Peso por acci\u00F3n", currency: cur, center: { value: String(pf.allocations.length), label: 'acciones' }, items: (() => {
+                                        const items = pf.allocations.map(a => ({ key: a.ticker, label: a.ticker, sub: a.shortName && a.shortName !== a.ticker ? a.shortName : sectorEs(a.sector), weight: Math.abs(a.weight) }));
+                                        const cash = 1 - items.reduce((t, i) => t + i.weight, 0);
+                                        // Con pocas acciones, el límite de 25 % por acción deja parte en efectivo.
+                                        if (cash > 0.01)
+                                            items.push({ key: 'cash', label: 'Efectivo', sub: 'límite de 25 % por acción', weight: cash, color: 'var(--text-3)' });
+                                        return items;
+                                    })() })
+                                : React.createElement(Donut, { key: "sector", title: "Peso por sector", currency: cur, center: { value: String((pf.sectors || []).length), label: 'sectores' }, items: (pf.sectors || []).map(sc => ({ key: sc.name, label: sectorEs(sc.name), sub: `${sc.count} acción${sc.count > 1 ? 'es' : ''}`, weight: sc.weight })) })))),
+                run.backtestError && React.createElement("section", { id: "simple-panel-backtest", className: "simple-panel", "aria-label": "Backtest" },
                     React.createElement("header", null,
-                        React.createElement("span", { className: "simple-panel-n" }, "3"),
+                        React.createElement("span", { className: "simple-panel-n error" }, "5"),
                         React.createElement("div", null,
                             React.createElement("h2", null, "Backtest"),
                             React.createElement("p", null, run.backtestError)))),
-                bt && React.createElement("section", { className: "simple-panel simple-result", "aria-label": "Resultado del backtest" },
+                bt && React.createElement("section", { id: "simple-panel-backtest", className: "simple-panel simple-result", "aria-label": "Resultado del backtest" },
                     React.createElement("header", null,
-                        React.createElement("span", { className: "simple-panel-n" }, "3"),
+                        React.createElement("span", { className: 'simple-panel-n' + (done('backtest') ? ' done' : '') }, "5"),
                         React.createElement("div", null,
                             React.createElement("h2", null, "Backtest \u00B7 \u00BFhabr\u00EDa funcionado en el pasado?"),
                             React.createElement("p", null, `La estrategia se aplica semana a semana desde ${monthYear(bt.summary.start)} con 10.000 ${cur}: compra cuando se cumplen las reglas, vende cuando se cumplen las de salida, reparte el dinero según rentabilidad/riesgo y descuenta comisiones.`))),

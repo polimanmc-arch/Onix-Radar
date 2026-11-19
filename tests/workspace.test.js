@@ -418,7 +418,7 @@ test('simple mode: first visit opens the 3-step simulator, plays a game and can 
   assert.equal(tree.root.findAllByProps({className:'workspace-rail'}).length,0,'no sidebar in simple mode');
   assert.ok(json().includes('Simulador de estrategias'));
   const text=n=>n.children.map(ch=>typeof ch==='string'?ch:text(ch)).join('');
-  const btn=label=>tree.root.find(n=>n.type==='button'&&text(n).includes(label));
+  const btn=label=>tree.root.findAll(n=>n.type==='button'&&text(n).includes(label)&&!String(n.props['aria-label']||'').startsWith('Paso '))[0];
   // Zonas de mercado con sus opciones y la estrategia base preseleccionada con su detalle.
   for(const g of ['Acciones de EE. UU.','Europa','ETF y otros activos','Universo completo']) assert.ok(json().includes(g),g);
   for(const o of ['S&P 500','Dow Jones 30','Nasdaq 100','Russell 2000 (top 25)','Todas las americanas']) assert.ok(btn(o),o);
@@ -437,16 +437,18 @@ test('simple mode: first visit opens the 3-step simulator, plays a game and can 
   assert.equal(tree.root.findAllByProps({'aria-label':'Portafolio de Markowitz'}).length,1,'Markowitz section');
   assert.equal(tree.root.findAllByProps({'aria-label':'Frontera eficiente de Markowitz con el portafolio elegido'}).length,1,'efficient frontier');
   assert.equal(tree.root.findAllByProps({'aria-label':'Resultado del backtest'}).length,1,'backtest section');
-  assert.ok(json().includes('Peso por acción')&&json().includes('Peso por sector'));
-  assert.equal(tree.root.findAll(n=>n.type==='svg'&&String(n.props['aria-label']||'').startsWith('Peso por acción:')).length,1,'stock weights donut');
-  assert.equal(tree.root.findAll(n=>n.type==='svg'&&String(n.props['aria-label']||'').startsWith('Peso por sector:')).length,1,'sector weights donut');
+  assert.ok(json().includes('Reparto del dinero')&&json().includes('Por acción')&&json().includes('Por sector'));
+  const donut=prefix=>tree.root.findAll(n=>n.type==='svg'&&String(n.props['aria-label']||'').startsWith(prefix)).length;
+  assert.equal(donut('Peso por acción:'),1,'one donut, by stock first'); assert.equal(donut('Peso por sector:'),0);
+  await Renderer.act(async()=>{ btn('Por sector').props.onClick(); });
+  assert.equal(donut('Peso por sector:'),1,'the switch shows the sector donut'); assert.equal(donut('Peso por acción:'),0);
   assert.equal(tree.root.findAllByProps({className:'simple-candles'}).length,1,'candlestick chart beside the scanner table');
   const rows=tree.root.findAll(n=>n.type==='tr'&&typeof n.props.onClick==='function');
   if(rows.length>1){ await Renderer.act(async()=>{ rows[1].props.onClick(); }); assert.equal(tree.root.findAll(n=>n.type==='tr'&&n.props['aria-selected']===true).length,1,'one selected row'); }
   assert.ok(json().includes('Comprar el Dow Jones (DIA) y esperar')&&json().includes('Ratio de Sharpe'));
   assert.ok(json().includes('Precio > SMA(40)'),'the scanner shows the applied rules');
   assert.ok(tree.root.findAllByProps({className:'simple-stars'}).length>=1);
-  assert.equal(tree.root.findAll(n=>n.type==='li'&&n.props['data-state']==='done').length,3,'all stages done');
+  assert.equal(tree.root.findAll(n=>n.type==='li'&&n.props['data-state']==='done').length,5,'the whole path (market, strategy, scanner, Markowitz, backtest) is green');
   assert.equal(tree.root.findAllByProps({'aria-label':'Tus partidas'}).length,1);
   // Cambiar a modo experto muestra la app completa y se recuerda.
   await Renderer.act(async()=>tree.root.find(n=>n.type==='button'&&n.children.join('')==='Experto').props.onClick());

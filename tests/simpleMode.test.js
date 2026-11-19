@@ -65,3 +65,25 @@ test('market groups: every option resolves to a universe; yields are excluded an
   assert.equal(global.btLightMemory,false);
   assert.equal(c.buildSimpleBacktestOptions({market:c.SIMPLE_MARKETS.find(m=>m.id==='SP500'),strategy:base,period}).btUniverseSource,'SP500');
 });
+
+test('"Todo el mercado" downloads every US stock once and adds Europe, indices, commodities and bonds',async()=>{
+  const ctx=vm.createContext({window:{},console});
+  for(const f of ['config/sp500History.js','config/universes.js','core/simpleSimulator.js'])
+    vm.runInContext(fs.readFileSync(path.join(root,'public/app',f),'utf8'),ctx);
+  const c=ctx.window.StockScannerCore, cfg=ctx.window.StockScannerConfig;
+  const market=c.SIMPLE_MARKETS.find(m=>m.id==='MARKET_ALL');
+  assert.ok(market&&market.group==='global'&&market.heavy);
+  assert.equal(c.simpleUniverseReady(market),false);
+  let calls=0;
+  const fetchImpl=async url=>{ calls++; assert.equal(url,'/api/tickers'); return {json:async()=>({tickers:['zzzz','AAPL','YYYY']})}; };
+  const list=await c.resolveSimpleUniverse(market,fetchImpl);
+  await c.resolveSimpleUniverse(market,fetchImpl);
+  assert.equal(calls,1,'the list is downloaded once');
+  assert.ok(c.simpleUniverseReady(market));
+  assert.ok(list.includes('ZZZZ')&&list.includes('YYYY')&&list.includes(cfg.EUROPE_MAJOR_INDICES_COMPONENTS[0])&&list.includes('GLD'));
+  assert.ok(!list.includes('^TNX'),'yields are not investable');
+  assert.equal(new Set(list).size,list.length);
+  const o=c.buildSimpleBacktestOptions({market,strategy:c.SIMPLE_STRATEGIES[0],period:{weeks:52}});
+  assert.equal(o.btUniverseSource,'custom'); assert.equal(o.btCustomTickers.split(', ').length,list.length);
+  await assert.rejects(c.resolveSimpleUniverse({...market,id:'OTHER'},async()=>({json:async()=>({})})),/lista/);
+});

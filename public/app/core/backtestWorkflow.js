@@ -44,8 +44,15 @@
         lastYieldAt=now;
         resolve();
       };
-      if(typeof requestAnimationFrame==='function') requestAnimationFrame(()=>setTimeout(done,0));
-      else setTimeout(done,0);
+      // requestAnimationFrame deja pintar el progreso, pero no se dispara con la pestaña en segundo plano
+      // (ni en navegadores sin pantalla): sin el temporizador de respaldo el backtest se quedaba parado.
+      let finished=false;
+      const finish=()=>{ if(finished) return; finished=true; done(); };
+      // Con la página oculta los temporizadores encadenados se limitan a ~1 por minuto: MessageChannel no.
+      const hidden=typeof document!=='undefined'&&document.hidden;
+      if(hidden&&typeof MessageChannel==='function'){ const ch=new MessageChannel(); ch.port1.onmessage=()=>{ ch.port1.close(); finish(); }; ch.port2.postMessage(0); }
+      else if(typeof requestAnimationFrame==='function'){ requestAnimationFrame(()=>setTimeout(finish,0)); setTimeout(finish,50); }
+      else setTimeout(finish,0);
     });
     const shouldYield=(budgetMs=32)=>(nowMs()-lastYieldAt)>=budgetMs;
     const yieldIfNeeded=async(phase,done,total,extra={},budgetMs=32)=>{
@@ -516,7 +523,9 @@
             }
           }
           simulationChunks++;
-          if(validTickers.length>1000 && end<validTickers.length){
+          // Ceder al navegador sólo cuando se agota el presupuesto de tiempo: ceder en cada bloque
+          // esperaba un fotograma (~16 ms) unas 5.000 veces con el universo completo.
+          if(validTickers.length>1000 && end<validTickers.length && shouldYield(24)){
             simulationYieldCount++;
             const weekDone=startWeek-signalIndex+Math.min(0.95,end/validTickers.length);
             report('Simulando semanas',weekDone,startWeek-lastSignalIndex,{current:`${label}: ${end}/${validTickers.length}`,simulationChunks,simulationYieldCount});
