@@ -585,9 +585,6 @@ window.StockScannerUI = window.StockScannerUI || {};
         const fmtCol = (v, fmt) => fmt === 'pct' ? pct(v) : fmt === 'num' ? num(v, 1) : (v !== null && v !== void 0 ? v : '—');
         return (React.createElement("div", { className: "simple-mode" },
             React.createElement("section", { className: "simple-hero" },
-                React.createElement("span", { className: "simple-byline" },
-                    "Creado por ",
-                    React.createElement("b", null, "Diego Santos")),
                 React.createElement("h1", null, "Radar Onix \u00B7 Simulador de inversi\u00F3n"),
                 React.createElement("p", null, "Del esc\u00E1ner al portafolio: elige un mercado y una estrategia y sigue el proceso completo con datos reales.")),
             React.createElement("ol", { className: "simple-pipeline simple-path", "aria-label": "Camino del an\u00E1lisis" }, path.map(s => (React.createElement("li", { key: s.id, "data-state": s.state },

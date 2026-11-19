@@ -506,7 +506,6 @@ window.StockScannerUI = window.StockScannerUI || {};
     return (
       <div className="simple-mode">
         <section className="simple-hero">
-          <span className="simple-byline">Creado por <b>Diego Santos</b></span>
           <h1>Radar Onix · Simulador de inversión</h1>
           <p>Del escáner al portafolio: elige un mercado y una estrategia y sigue el proceso completo con datos reales.</p>
         </section>
