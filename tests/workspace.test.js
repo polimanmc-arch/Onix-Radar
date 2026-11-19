@@ -423,7 +423,7 @@ test('simple mode: first visit opens the 3-step simulator, plays a game and can 
   for(const g of ['Acciones de EE. UU.','Europa','ETF y otros activos','Universo completo']) assert.ok(json().includes(g),g);
   for(const o of ['S&P 500','Dow Jones 30','Nasdaq 100','Russell 2000 (top 25)','Todas las americanas']) assert.ok(btn(o),o);
   assert.equal(tree.root.findByProps({'aria-label':'Ver el detalle de Estrategia base Radar Onix'}).type,'button');
-  assert.ok(json().includes('Estocástico %K(1) < 20')&&json().includes('WMA 30'),'base strategy rules and indicators are readable');
+  assert.ok(json().includes('Stoch %K(1) < 20')&&json().includes('WMA 30'),'base strategy rules and indicators are readable');
   assert.equal(tree.root.findAllByProps({className:'simple-rule'}).length,0,'dense rules live in the tooltip, not on the card');
   await Renderer.act(async()=>btn('Europa').props.onClick());
   assert.ok(btn('IBEX 35')&&btn('Toda Europa'));

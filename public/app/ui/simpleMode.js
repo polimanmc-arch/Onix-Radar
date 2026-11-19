@@ -151,7 +151,7 @@ window.StockScannerUI = window.StockScannerUI || {};
         </figcaption>
         <div ref={host} className="simple-candles-chart" role="img" aria-label={`Gráfico de velas semanales de ${ticker}`}/>
         {oscFilters.length > 0 && <div className="simple-osc">
-          <span className="simple-osc-label">{oscFilters.map((f, i) => <span key={f.ind + f.params.p}><i style={{ background: OSC_COLORS[i % OSC_COLORS.length] }}/>{f.ind === 'RSI' ? `RSI ${f.params.p}` : `Estocástico %K ${f.params.p}`}</span>)}</span>
+          <span className="simple-osc-label">{oscFilters.map((f, i) => <span key={f.ind + f.params.p}><i style={{ background: OSC_COLORS[i % OSC_COLORS.length] }}/>{f.ind === 'RSI' ? `RSI ${f.params.p}` : `Stoch ${f.params.p}`}</span>)}</span>
           <div ref={el => { oscRefs.current[0] = el; }} className="simple-osc-chart" role="img" aria-label={`${oscFilters.map(f => f.ind === 'RSI' ? 'RSI' : 'Estocástico').join(' y ')} de ${ticker}`}/>
         </div>}
         {!ok && <p className="simple-note">No hay gráfico disponible para este valor.</p>}
@@ -219,7 +219,13 @@ window.StockScannerUI = window.StockScannerUI || {};
     const market = markets.find(m => m.id === marketId);
     const group = groups.find(g => g.id === market?.group) || groups[0];
     const countOf = m => C.simpleUniverseReady(m) ? C.simpleUniverseTickers(m).length.toLocaleString('es-ES') : '≈' + (m.approx || 0).toLocaleString('es-ES');
-    const strategy = strategies.find(s => s.id === strategyId);
+    // Filtro del S&P 500: activado de serie en la estrategia base; se puede poner o quitar en cualquiera.
+    const [mktFilter, setMktFilter] = useState({});
+    const mktOnOf = st => mktFilter[st.id] ?? !!st.marketDefault;
+    const effOf = st => C.simpleWithMarketFilter(st, mktOnOf(st));
+    const tagOf = st => st && mktOnOf(st) !== !!st.marketDefault ? (mktOnOf(st) ? ' + filtro S&P' : ' sin filtro S&P') : '';
+    const baseStrategy = strategies.find(s => s.id === strategyId);
+    const strategy = useMemo(() => effOf(baseStrategy), [baseStrategy, mktFilter]);
     const period = periods.find(p => p.years === years) || periods[periods.length - 1];
     const running = stage !== 'idle' && stage !== 'done';
     const ready = market && strategy && !running;
@@ -227,7 +233,7 @@ window.StockScannerUI = window.StockScannerUI || {};
     const execute = async () => {
       if(!ready) return;
       const ac = new AbortController(); abortRef.current = ac;
-      const cfg = { market, strategy, period };
+      const cfg = { market, strategy, period, tag: tagOf(baseStrategy) };
       setError(null); setRun({ ...cfg }); setSelTicker(null); setStartedAt(Date.now()); setProgressPct(null);
       const n = n => Number(n).toLocaleString('es-ES');
       setTimeout(() => sectionRef.current?.scrollIntoView?.({ behavior: 'smooth', block: 'start' }), 60);
@@ -269,7 +275,7 @@ window.StockScannerUI = window.StockScannerUI || {};
         const backtest = summary ? { summary, annReturn: raw.annReturn, sharpe: raw.sharpe, commissions: raw.totalCommissionPaid } : null;
         setRun(r => ({ ...r, backtest, backtestError: backtest ? null : (out?.message || 'No hubo datos suficientes para el backtest.') }));
         if(summary){
-          const game = { id: Date.now(), market: market.name, flag: market.icon, strategy: strategy.name, icon: strategy.icon, period: period.label, ret: summary.ret, benchRet: summary.benchRet, stars: summary.stars };
+          const game = { id: Date.now(), market: market.name, flag: market.icon, strategy: strategy.name + cfg.tag, icon: strategy.icon, period: period.label, ret: summary.ret, benchRet: summary.benchRet, stars: summary.stars };
           setGames(prev => { const next = [game, ...prev].slice(0, 30); saveGames(next); return next; });
         }
         setStage('done');
@@ -306,7 +312,7 @@ window.StockScannerUI = window.StockScannerUI || {};
     const done = id => stageState(id) === 'done';
     const path = [
       { id: 'market', n: 1, label: 'Mercado', state: market ? 'done' : 'todo', detail: market && `${market.icon} ${market.name}`, target: 'simple-step-market' },
-      { id: 'strategy', n: 2, label: 'Estrategia', state: strategy ? 'done' : 'todo', detail: strategy && `${strategy.icon} ${strategy.name}`, target: 'simple-step-strategy' },
+      { id: 'strategy', n: 2, label: 'Estrategia', state: strategy ? 'done' : 'todo', detail: strategy && `${strategy.icon} ${strategy.name}${tagOf(baseStrategy)}`, target: 'simple-step-strategy' },
       { id: 'scan', n: 3, label: 'Escáner', state: stageState('scan'), detail: scan && `${scan.passing.length} de ${scan.analyzed} cumplen`, target: scan && 'simple-panel-scan' },
       { id: 'portfolio', n: 4, label: 'Portafolio Markowitz', state: stageState('portfolio'), detail: pf ? `${pf.allocations.length} acciones` : run?.portfolioError && 'Sin portafolio', target: (pf || run?.portfolioError) && 'simple-panel-portfolio' },
       { id: 'backtest', n: 5, label: 'Backtest', state: stageState('backtest'), detail: bt ? `${pct(bt.summary.ret)} · ${'★'.repeat(bt.summary.stars) || 'sin estrellas'}` : run?.backtestError && 'Sin resultado', target: (bt || run?.backtestError) && 'simple-panel-backtest' },
@@ -357,7 +363,7 @@ window.StockScannerUI = window.StockScannerUI || {};
           <section className="simple-step" aria-labelledby="simple-step-strategy">
             <h2 id="simple-step-strategy"><span className={'simple-step-n' + (strategy ? ' done' : '')}>2</span>Estrategia</h2>
             <div className="simple-grid simple-grid-3">
-              {strategies.map(st => (
+              {strategies.map(effOf).map(st => (
                 <div key={st.id} className="simple-card-wrap">
                   <button type="button" className="simple-card simple-card-strategy" aria-pressed={st.id === strategyId} onClick={() => setStrategyId(st.id)} disabled={running}>
                     <span className="simple-card-icon">{st.icon}</span><strong>{st.name}</strong><span>{st.pitch}</span>
@@ -381,6 +387,12 @@ window.StockScannerUI = window.StockScannerUI || {};
             </div>
           </section>
           <div className="simple-launch">
+            {strategy && <div className="simple-periods simple-mkt-toggle" role="group" aria-label="Filtro de mercado del S&P 500"
+              title="Si está activado, la estrategia sólo compra cuando la WMA(30) semanal del S&P 500 sube; si baja, vende todo y espera.">
+              <span>Filtro S&P 500:</span>
+              {[true, false].map(on => <button type="button" key={String(on)} aria-pressed={mktOnOf(baseStrategy) === on} disabled={running}
+                onClick={() => setMktFilter(m => ({ ...m, [baseStrategy.id]: on }))}>{on ? 'Activado' : 'Quitado'}</button>)}
+            </div>}
             <div className="simple-periods" role="group" aria-label="Periodo del backtest">
               <span>Backtest:</span>
               {periods.map(p => <button type="button" key={p.years} aria-pressed={p.years === years} onClick={() => setYears(p.years)} disabled={running}>{p.label}</button>)}
@@ -408,15 +420,15 @@ window.StockScannerUI = window.StockScannerUI || {};
           </div>}
           {scan && <section id="simple-panel-scan" className="simple-panel" aria-label="Escáner">
             <header><span className={'simple-panel-n' + (done('scan') ? ' done' : '')}>3</span><div>
-              <h2>Escáner · ¿qué acciones cumplen hoy la estrategia?</h2>
-              <p>Se revisan todas las acciones del mercado con la última vela semanal cerrada y se quedan las que cumplen las reglas de compra.</p>
-              <p className="simple-applied"><b>{`${run.strategy.icon} ${run.strategy.name}:`}</b> {run.strategy.rulesBuy.join(' · ')}</p>
+              <h2>Escáner</h2>
+              <p>Acciones que hoy cumplen las reglas de compra (última vela semanal).</p>
             </div></header>
-            {scan.market && <div className={'simple-market-filter ' + (scan.market.ok ? 'ok' : scan.market.ok === false ? 'off' : 'na')}>
-              <span aria-hidden="true">{scan.market.ok ? '🟢' : scan.market.ok === false ? '🔴' : '⚪'}</span>
-              <div><b>{`Filtro de mercado · ${scan.market.name}: `}{scan.market.ok ? 'alcista' : scan.market.ok === false ? 'bajista' : 'sin datos'}</b>
-                <small>{scan.market.ok ? `${scan.market.on}: la estrategia puede comprar esta semana.` : scan.market.ok === false ? `${scan.market.off}: esta semana la estrategia no compraría (y vendería lo que tenga). Mostramos igualmente las acciones que cumplen las demás reglas.` : 'No se pudo comprobar el filtro de mercado.'}</small></div>
-            </div>}
+            <div className="simple-scan-rules" aria-label={`Reglas de ${run.strategy.name}`}>
+              {scan.market && <span className={'simple-market-filter ' + (scan.market.ok ? 'ok' : scan.market.ok === false ? 'off' : 'na')}
+                title={scan.market.ok ? `${scan.market.on}: la estrategia puede comprar esta semana.` : scan.market.ok === false ? `${scan.market.off}: esta semana no compraría y vendería lo que tenga. La tabla muestra igualmente las acciones que cumplen las demás reglas.` : 'No se pudo comprobar el filtro de mercado.'}>
+                <i aria-hidden="true"/>{`${scan.market.name} ${scan.market.ok ? 'alcista: puede comprar' : scan.market.ok === false ? 'bajista: no compra esta semana' : 'sin datos'}`}</span>}
+              {run.strategy.rulesBuy.filter(r => !r.startsWith('Filtro de mercado')).map(r => <span key={r} className="simple-rule-chip">{r}</span>)}
+            </div>
             <div className="simple-kpis">
               <div><span>Acciones analizadas</span><strong>{scan.analyzed}</strong></div>
               <div><span>Cumplen la estrategia</span><strong>{scan.passing.length}</strong></div>

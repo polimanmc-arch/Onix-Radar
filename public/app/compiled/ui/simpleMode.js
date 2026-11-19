@@ -176,7 +176,7 @@ window.StockScannerUI = window.StockScannerUI || {};
             oscFilters.length > 0 && React.createElement("div", { className: "simple-osc" },
                 React.createElement("span", { className: "simple-osc-label" }, oscFilters.map((f, i) => React.createElement("span", { key: f.ind + f.params.p },
                     React.createElement("i", { style: { background: OSC_COLORS[i % OSC_COLORS.length] } }),
-                    f.ind === 'RSI' ? `RSI ${f.params.p}` : `Estocástico %K ${f.params.p}`))),
+                    f.ind === 'RSI' ? `RSI ${f.params.p}` : `Stoch ${f.params.p}`))),
                 React.createElement("div", { ref: el => { oscRefs.current[0] = el; }, className: "simple-osc-chart", role: "img", "aria-label": `${oscFilters.map(f => f.ind === 'RSI' ? 'RSI' : 'Estocástico').join(' y ')} de ${ticker}` })),
             !ok && React.createElement("p", { className: "simple-note" }, "No hay gr\u00E1fico disponible para este valor.")));
     });
@@ -237,7 +237,13 @@ window.StockScannerUI = window.StockScannerUI || {};
         const market = markets.find(m => m.id === marketId);
         const group = groups.find(g => g.id === (market === null || market === void 0 ? void 0 : market.group)) || groups[0];
         const countOf = m => C.simpleUniverseReady(m) ? C.simpleUniverseTickers(m).length.toLocaleString('es-ES') : '≈' + (m.approx || 0).toLocaleString('es-ES');
-        const strategy = strategies.find(s => s.id === strategyId);
+        // Filtro del S&P 500: activado de serie en la estrategia base; se puede poner o quitar en cualquiera.
+        const [mktFilter, setMktFilter] = useState({});
+        const mktOnOf = st => { var _a; return (_a = mktFilter[st.id]) !== null && _a !== void 0 ? _a : !!st.marketDefault; };
+        const effOf = st => C.simpleWithMarketFilter(st, mktOnOf(st));
+        const tagOf = st => st && mktOnOf(st) !== !!st.marketDefault ? (mktOnOf(st) ? ' + filtro S&P' : ' sin filtro S&P') : '';
+        const baseStrategy = strategies.find(s => s.id === strategyId);
+        const strategy = useMemo(() => effOf(baseStrategy), [baseStrategy, mktFilter]);
         const period = periods.find(p => p.years === years) || periods[periods.length - 1];
         const running = stage !== 'idle' && stage !== 'done';
         const ready = market && strategy && !running;
@@ -246,7 +252,7 @@ window.StockScannerUI = window.StockScannerUI || {};
                 return;
             const ac = new AbortController();
             abortRef.current = ac;
-            const cfg = { market, strategy, period };
+            const cfg = { market, strategy, period, tag: tagOf(baseStrategy) };
             setError(null);
             setRun({ ...cfg });
             setSelTicker(null);
@@ -311,7 +317,7 @@ window.StockScannerUI = window.StockScannerUI || {};
                 const backtest = summary ? { summary, annReturn: raw.annReturn, sharpe: raw.sharpe, commissions: raw.totalCommissionPaid } : null;
                 setRun(r => ({ ...r, backtest, backtestError: backtest ? null : ((out === null || out === void 0 ? void 0 : out.message) || 'No hubo datos suficientes para el backtest.') }));
                 if (summary) {
-                    const game = { id: Date.now(), market: market.name, flag: market.icon, strategy: strategy.name, icon: strategy.icon, period: period.label, ret: summary.ret, benchRet: summary.benchRet, stars: summary.stars };
+                    const game = { id: Date.now(), market: market.name, flag: market.icon, strategy: strategy.name + cfg.tag, icon: strategy.icon, period: period.label, ret: summary.ret, benchRet: summary.benchRet, stars: summary.stars };
                     setGames(prev => { const next = [game, ...prev].slice(0, 30); saveGames(next); return next; });
                 }
                 setStage('done');
@@ -358,7 +364,7 @@ window.StockScannerUI = window.StockScannerUI || {};
         const done = id => stageState(id) === 'done';
         const path = [
             { id: 'market', n: 1, label: 'Mercado', state: market ? 'done' : 'todo', detail: market && `${market.icon} ${market.name}`, target: 'simple-step-market' },
-            { id: 'strategy', n: 2, label: 'Estrategia', state: strategy ? 'done' : 'todo', detail: strategy && `${strategy.icon} ${strategy.name}`, target: 'simple-step-strategy' },
+            { id: 'strategy', n: 2, label: 'Estrategia', state: strategy ? 'done' : 'todo', detail: strategy && `${strategy.icon} ${strategy.name}${tagOf(baseStrategy)}`, target: 'simple-step-strategy' },
             { id: 'scan', n: 3, label: 'Escáner', state: stageState('scan'), detail: scan && `${scan.passing.length} de ${scan.analyzed} cumplen`, target: scan && 'simple-panel-scan' },
             { id: 'portfolio', n: 4, label: 'Portafolio Markowitz', state: stageState('portfolio'), detail: pf ? `${pf.allocations.length} acciones` : (run === null || run === void 0 ? void 0 : run.portfolioError) && 'Sin portafolio', target: (pf || (run === null || run === void 0 ? void 0 : run.portfolioError)) && 'simple-panel-portfolio' },
             { id: 'backtest', n: 5, label: 'Backtest', state: stageState('backtest'), detail: bt ? `${pct(bt.summary.ret)} · ${'★'.repeat(bt.summary.stars) || 'sin estrellas'}` : (run === null || run === void 0 ? void 0 : run.backtestError) && 'Sin resultado', target: (bt || (run === null || run === void 0 ? void 0 : run.backtestError)) && 'simple-panel-backtest' },
@@ -396,7 +402,7 @@ window.StockScannerUI = window.StockScannerUI || {};
                     React.createElement("h2", { id: "simple-step-strategy" },
                         React.createElement("span", { className: 'simple-step-n' + (strategy ? ' done' : '') }, "2"),
                         "Estrategia"),
-                    React.createElement("div", { className: "simple-grid simple-grid-3" }, strategies.map(st => (React.createElement("div", { key: st.id, className: "simple-card-wrap" },
+                    React.createElement("div", { className: "simple-grid simple-grid-3" }, strategies.map(effOf).map(st => (React.createElement("div", { key: st.id, className: "simple-card-wrap" },
                         React.createElement("button", { type: "button", className: "simple-card simple-card-strategy", "aria-pressed": st.id === strategyId, onClick: () => setStrategyId(st.id), disabled: running },
                             React.createElement("span", { className: "simple-card-icon" }, st.icon),
                             React.createElement("strong", null, st.name),
@@ -436,6 +442,9 @@ window.StockScannerUI = window.StockScannerUI || {};
                                     React.createElement("b", null, "C\u00F3mo se eval\u00FAa:"),
                                     React.createElement("ul", null, C.SIMPLE_PROCESS_METRICS.map(m => React.createElement("li", { key: m }, m))))))))))),
                 React.createElement("div", { className: "simple-launch" },
+                    strategy && React.createElement("div", { className: "simple-periods simple-mkt-toggle", role: "group", "aria-label": "Filtro de mercado del S&P 500", title: "Si est\u00E1 activado, la estrategia s\u00F3lo compra cuando la WMA(30) semanal del S&P 500 sube; si baja, vende todo y espera." },
+                        React.createElement("span", null, "Filtro S&P 500:"),
+                        [true, false].map(on => React.createElement("button", { type: "button", key: String(on), "aria-pressed": mktOnOf(baseStrategy) === on, disabled: running, onClick: () => setMktFilter(m => ({ ...m, [baseStrategy.id]: on })) }, on ? 'Activado' : 'Quitado'))),
                     React.createElement("div", { className: "simple-periods", role: "group", "aria-label": "Periodo del backtest" },
                         React.createElement("span", null, "Backtest:"),
                         periods.map(p => React.createElement("button", { type: "button", key: p.years, "aria-pressed": p.years === years, onClick: () => setYears(p.years), disabled: running }, p.label))),
@@ -457,19 +466,13 @@ window.StockScannerUI = window.StockScannerUI || {};
                     React.createElement("header", null,
                         React.createElement("span", { className: 'simple-panel-n' + (done('scan') ? ' done' : '') }, "3"),
                         React.createElement("div", null,
-                            React.createElement("h2", null, "Esc\u00E1ner \u00B7 \u00BFqu\u00E9 acciones cumplen hoy la estrategia?"),
-                            React.createElement("p", null, "Se revisan todas las acciones del mercado con la \u00FAltima vela semanal cerrada y se quedan las que cumplen las reglas de compra."),
-                            React.createElement("p", { className: "simple-applied" },
-                                React.createElement("b", null, `${run.strategy.icon} ${run.strategy.name}:`),
-                                " ",
-                                run.strategy.rulesBuy.join(' · ')))),
-                    scan.market && React.createElement("div", { className: 'simple-market-filter ' + (scan.market.ok ? 'ok' : scan.market.ok === false ? 'off' : 'na') },
-                        React.createElement("span", { "aria-hidden": "true" }, scan.market.ok ? '🟢' : scan.market.ok === false ? '🔴' : '⚪'),
-                        React.createElement("div", null,
-                            React.createElement("b", null,
-                                `Filtro de mercado · ${scan.market.name}: `,
-                                scan.market.ok ? 'alcista' : scan.market.ok === false ? 'bajista' : 'sin datos'),
-                            React.createElement("small", null, scan.market.ok ? `${scan.market.on}: la estrategia puede comprar esta semana.` : scan.market.ok === false ? `${scan.market.off}: esta semana la estrategia no compraría (y vendería lo que tenga). Mostramos igualmente las acciones que cumplen las demás reglas.` : 'No se pudo comprobar el filtro de mercado.'))),
+                            React.createElement("h2", null, "Esc\u00E1ner"),
+                            React.createElement("p", null, "Acciones que hoy cumplen las reglas de compra (\u00FAltima vela semanal)."))),
+                    React.createElement("div", { className: "simple-scan-rules", "aria-label": `Reglas de ${run.strategy.name}` },
+                        scan.market && React.createElement("span", { className: 'simple-market-filter ' + (scan.market.ok ? 'ok' : scan.market.ok === false ? 'off' : 'na'), title: scan.market.ok ? `${scan.market.on}: la estrategia puede comprar esta semana.` : scan.market.ok === false ? `${scan.market.off}: esta semana no compraría y vendería lo que tenga. La tabla muestra igualmente las acciones que cumplen las demás reglas.` : 'No se pudo comprobar el filtro de mercado.' },
+                            React.createElement("i", { "aria-hidden": "true" }),
+                            `${scan.market.name} ${scan.market.ok ? 'alcista: puede comprar' : scan.market.ok === false ? 'bajista: no compra esta semana' : 'sin datos'}`),
+                        run.strategy.rulesBuy.filter(r => !r.startsWith('Filtro de mercado')).map(r => React.createElement("span", { key: r, className: "simple-rule-chip" }, r))),
                     React.createElement("div", { className: "simple-kpis" },
                         React.createElement("div", null,
                             React.createElement("span", null, "Acciones analizadas"),

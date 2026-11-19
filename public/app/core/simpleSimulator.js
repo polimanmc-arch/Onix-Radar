@@ -53,7 +53,7 @@
   const IND = {
     WMA30: { name: 'WMA 30', what: 'Media móvil ponderada de 30 semanas: tendencia de fondo, con más peso en las semanas recientes.' },
     RSI4: { name: 'RSI 4', what: 'Índice de fuerza relativa de 4 semanas (0-100): por debajo de 30-35 indica una caída fuerte reciente (sobreventa).' },
-    STOCH1: { name: 'Estocástico %K 1', what: 'Dónde cerró la semana dentro de su rango máximo-mínimo (0-100): por debajo de 20 cerró cerca del mínimo.' },
+    STOCH1: { name: 'Stoch %K 1', what: 'Dónde cerró la semana dentro de su rango máximo-mínimo (0-100): por debajo de 20 cerró cerca del mínimo.' },
     SMA40: { name: 'SMA 40', what: 'Media móvil simple de 40 semanas (unos 9 meses): referencia de la tendencia de largo plazo.' },
     SMA10: { name: 'SMA 10', what: 'Media móvil simple de 10 semanas: tendencia de corto plazo.' },
     RSI14: { name: 'RSI 14', what: 'Índice de fuerza relativa de 14 semanas (0-100): por encima de 60 indica fuerza sostenida.' },
@@ -71,19 +71,17 @@
     {
       id: 'base', icon: '🎯', name: 'Estrategia base Radar Onix', level: 'Rebote en tendencia', isBase: true,
       pitch: 'Compra acciones con tendencia alcista que acaban de sufrir una caída fuerte, para aprovechar el rebote.',
-      buy: 'El S&P 500 está en tendencia alcista, la tendencia de fondo de la acción sube, el RSI marca sobreventa y la semana cerró cerca de su mínimo.',
-      sell: 'La tendencia de fondo se gira, el RSI y el estocástico marcan sobrecompra, o el S&P 500 se vuelve bajista.',
-      indicators: [IND.WMA30, IND.RSI4, IND.STOCH1, IND.MKT_SPX],
-      rulesBuy: ['Filtro de mercado: WMA(30) del S&P 500 sube', 'WMA(30) sube respecto a la semana anterior', 'RSI(4) < 35', 'Estocástico %K(1) < 20'],
-      rulesSell: ['WMA(30) baja respecto a la semana anterior', 'o bien RSI(4) > 65 y Estocástico %K(1) > 80', 'o bien la WMA(30) del S&P 500 baja (vende todo y no compra)'],
-      // Filtro de mercado del modo experto (WMA 30 semanal subiendo), evaluado sobre el S&P 500.
-      market: { ticker: 'SPY', name: 'S&P 500', rule: c('WMA', '>', 'prev', { params: { p: 30 } }), on: 'WMA(30) del S&P 500 subiendo', off: 'WMA(30) del S&P 500 bajando' },
+      buy: 'La tendencia de fondo de la acción sube, el RSI marca sobreventa y la semana cerró cerca de su mínimo.',
+      sell: 'La tendencia de fondo se gira, o el RSI y el estocástico marcan sobrecompra.',
+      indicators: [IND.WMA30, IND.RSI4, IND.STOCH1],
+      rulesBuy: ['WMA(30) sube respecto a la semana anterior', 'RSI(4) < 35', 'Stoch %K(1) < 20'],
+      rulesSell: ['WMA(30) baja respecto a la semana anterior', 'o bien RSI(4) > 65 y Stoch %K(1) > 80'],
+      marketDefault: true, // con el filtro del S&P 500 activado de serie (como en el modo experto)
       entry: [c('WMA', '>', 'prev', { params: { p: 30 } }), c('RSI', '<', 35, { params: { p: 4 } }), c('STOCH', '<', 20, { params: { p: 1, ks: 1, dp: 1 } })],
       exit: [[c('WMA', '<', 'prev', { params: { p: 30 } })], [c('RSI', '>', 65, { params: { p: 4 } }), c('STOCH', '>', 80, { params: { p: 1, ks: 1, dp: 1 } })]],
       columns: [
         { label: 'RSI 4', hint: 'Sobreventa por debajo de 35', get: fr => fr[1]?.val, fmt: 'num' },
-        { label: 'Estocástico 1', hint: 'Cierre cerca del mínimo por debajo de 20', get: fr => fr[2]?.val, fmt: 'num' },
-        { label: 'WMA 30', hint: 'Dirección de la tendencia de fondo', get: fr => (fr[0]?.pass ? 'Sube' : 'Baja'), fmt: 'text' },
+        { label: 'Stoch 1', hint: 'Cierre cerca del mínimo por debajo de 20', get: fr => fr[2]?.val, fmt: 'num' },
       ],
     },
     {
@@ -117,6 +115,23 @@
       ],
     },
   ];
+
+  // Filtro de mercado del modo experto (WMA 30 semanal subiendo), evaluado sobre el S&P 500.
+  // Se puede activar o quitar en cualquier estrategia.
+  const MARKET_FILTER = { ticker: 'SPY', name: 'S&P 500', rule: c('WMA', '>', 'prev', { params: { p: 30 } }), on: 'WMA(30) del S&P 500 subiendo', off: 'WMA(30) del S&P 500 bajando' };
+  const MKT_BUY = 'Filtro de mercado: WMA(30) del S&P 500 sube', MKT_SELL = 'o bien la WMA(30) del S&P 500 baja (vende todo y no compra)';
+  function withMarketFilter(strategy, on){
+    if(!strategy) return strategy;
+    const raw = strategy.raw || strategy;
+    if(!on) return raw;
+    if(strategy.market) return strategy;
+    const lower = t => t.charAt(0).toLowerCase() + t.slice(1);
+    return { ...raw, raw, market: MARKET_FILTER,
+      buy: 'Con el S&P 500 en tendencia alcista: ' + lower(raw.buy),
+      sell: raw.sell.replace(/\.$/, '') + ', o si el S&P 500 se vuelve bajista.',
+      indicators: [...raw.indicators, IND.MKT_SPX], rulesBuy: [MKT_BUY, ...raw.rulesBuy], rulesSell: [...raw.rulesSell, MKT_SELL] };
+  }
+  STRATEGIES.forEach((st, i) => { if(st.marketDefault) STRATEGIES[i] = withMarketFilter(st, true); });
 
   const PERIODS = [ { years: 1, weeks: 52, label: '1 año' }, { years: 3, weeks: 156, label: '3 años' } ];
   const CAPITAL = 10000;
@@ -310,7 +325,7 @@
   window.StockScannerCore = Object.assign(window.StockScannerCore || {}, {
     loadSimpleWeekly: loadWeekly, scanSimpleMarket: scanMarket, buildSimplePortfolioOptions, SIMPLE_CANDIDATES: CANDIDATES,
     todaySimpleSignals: todaySignals,
-    SIMPLE_MARKETS: MARKETS, SIMPLE_MARKET_GROUPS: MARKET_GROUPS, SIMPLE_PROCESS_METRICS: PROCESS_METRICS, simpleUniverseTickers: universeTickers, resolveSimpleUniverse: resolveUniverse, simpleUniverseReady: universeReady, SIMPLE_STRATEGIES: STRATEGIES, SIMPLE_PERIODS: PERIODS, SIMPLE_CAPITAL: CAPITAL,
+    SIMPLE_MARKETS: MARKETS, SIMPLE_MARKET_GROUPS: MARKET_GROUPS, SIMPLE_PROCESS_METRICS: PROCESS_METRICS, simpleUniverseTickers: universeTickers, resolveSimpleUniverse: resolveUniverse, simpleUniverseReady: universeReady, SIMPLE_STRATEGIES: STRATEGIES, simpleWithMarketFilter: withMarketFilter, SIMPLE_PERIODS: PERIODS, SIMPLE_CAPITAL: CAPITAL,
     buildSimpleBacktestOptions, summarizeSimpleResult,
   });
 })();

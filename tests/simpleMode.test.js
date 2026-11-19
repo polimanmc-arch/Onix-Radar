@@ -108,3 +108,21 @@ test('base strategy uses the expert market filter on the S&P 500 (weekly WMA 30 
   assert.equal(c.scanSimpleMarket({tickers:[],dataByTicker:{SPY:{'1wk':{ok:true,closes:[90]}}},strategy:base}).market.ok,false);
   assert.equal(c.scanSimpleMarket({tickers:[],dataByTicker:{},strategy:base}).market.ok,null);
 });
+
+test('the S&P 500 market filter can be switched off on the base strategy and on for any other strategy',()=>{
+  const ctx=vm.createContext({window:{},console});
+  vm.runInContext(fs.readFileSync(path.join(root,'public/app/core/simpleSimulator.js'),'utf8'),ctx);
+  const c=ctx.window.StockScannerCore;
+  const market={id:'DOW30',preset:'DOW30',benchmark:'DIA'}, period={weeks:52};
+  const base=c.SIMPLE_STRATEGIES.find(s=>s.id==='base'), trend=c.SIMPLE_STRATEGIES.find(s=>s.id==='trend');
+  const off=c.simpleWithMarketFilter(base,false);
+  assert.equal(off.market,undefined);
+  assert.ok(!off.rulesBuy.some(r=>r.includes('S&P'))&&!off.indicators.some(i=>i.name==='Filtro S&P 500'));
+  assert.equal(c.buildSimpleBacktestOptions({market,strategy:off,period}).mktFilterEnabled,false);
+  assert.equal(c.simpleWithMarketFilter(off,true).market.ticker,'SPY','switching it back on restores the filter');
+  const on=c.simpleWithMarketFilter(trend,true);
+  assert.ok(on.rulesBuy[0].startsWith('Filtro de mercado')&&on.buy.includes('S&P 500'));
+  const o=c.buildSimpleBacktestOptions({market,strategy:on,period});
+  assert.equal(o.mktFilterEnabled,true); assert.equal(o.mktRegimeTicker,'SPY');
+  assert.equal(c.simpleWithMarketFilter(on,false),trend);
+});
