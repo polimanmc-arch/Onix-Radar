@@ -61,6 +61,17 @@ window.StockScannerUI = window.StockScannerUI || {};
     return { rows, invested, cash: capital - invested };
   }
 
+  // Recuadro para escribir el dinero a invertir (con puntos de miles).
+  function CapitalInput({ value, onChange, cur, label = 'Dinero a invertir:' }){
+    return <label className="simple-capital">
+      <span>{label}</span>
+      <input type="text" inputMode="numeric" aria-label={`Dinero a invertir en ${cur}`} placeholder="10.000"
+        value={value ? value.toLocaleString('es-ES') : ''}
+        onChange={e => { const v = Number(e.target.value.replace(/\D/g, '').slice(0, 12)); onChange(Number.isFinite(v) ? v : 0); }}/>
+      <em>{cur}</em>
+    </label>;
+  }
+
   function Stars({ n, size = 26 }){
     return <span className="simple-stars" aria-label={`${n} de 3 estrellas`} style={{ fontSize: size }}>
       {[0, 1, 2].map(i => <span key={i} aria-hidden="true" className={i < n ? 'on' : 'off'}>★</span>)}
@@ -576,13 +587,7 @@ window.StockScannerUI = window.StockScannerUI || {};
           </section>}
           {scan && !pf && !run.portfolioError && !running && <div className="simple-next">
             <p><b>Siguiente:</b> con las mejores acciones del escáner, Markowitz busca el reparto del dinero con la mejor rentabilidad por unidad de riesgo.</p>
-            <label className="simple-capital">
-              <span>Dinero a invertir:</span>
-              <input type="text" inputMode="numeric" aria-label={`Dinero a invertir en ${cur}`} placeholder="10.000"
-                value={capital ? capital.toLocaleString('es-ES') : ''}
-                onChange={e => { const v = Number(e.target.value.replace(/\D/g, '').slice(0, 12)); setCapital(Number.isFinite(v) ? v : 0); }}/>
-              <em>{cur}</em>
-            </label>
+            <CapitalInput value={capital} onChange={setCapital} cur={cur}/>
             <button type="button" className="simple-play" onClick={runPortfolio} disabled={!(capital > 0)}>▶  Paso 4 · Construir el portafolio</button>
           </div>}
 
@@ -603,28 +608,15 @@ window.StockScannerUI = window.StockScannerUI || {};
               <div className="simple-weights">
                 <div className="simple-weights-head">
                   <h3>Reparto del dinero</h3>
+                  <CapitalInput label="" value={run.capital} cur={cur} onChange={v => { setCapital(v); setRun(r => ({ ...r, capital: v })); }}/>
                   <div className="simple-switch" role="group" aria-label="Ver el reparto">
                     <button type="button" aria-pressed={weightView === 'stock'} onClick={() => setWeightView('stock')}>Por acción</button>
                     <button type="button" aria-pressed={weightView === 'sector'} onClick={() => setWeightView('sector')}>Por sector</button>
                   </div>
                 </div>
                 {weightView === 'stock'
-                  ? <Donut key="stock" title="Peso por acción" currency={cur} capital={run.capital || 10000} center={stockCenter} items={stockItems}/>
-                  : <Donut key="sector" title="Peso por sector" currency={cur} capital={run.capital || 10000} center={sectorCenter} items={sectorItems}/>}
-                {weightView === 'stock' && order && <div className="simple-order">
-                  <h4>{`🧾 Orden para el bróker · ${money(run.capital || 10000, cur)}`}</h4>
-                  <table className="simple-table">
-                    <thead><tr><th>Acción</th><th>Precio</th><th>Comprar</th><th>Importe</th></tr></thead>
-                    <tbody>{order.rows.map(r => (
-                      <tr key={r.ticker}><td title={r.name}><b>{r.ticker}</b></td><td>{num(r.price)}</td>
-                        <td className={r.shares ? 'up' : 'muted'}><b>{r.shares.toLocaleString('es-ES')}</b></td><td>{money(r.amount, cur)}</td></tr>))}</tbody>
-                    <tfoot>
-                      <tr><td colSpan={3}>Total invertido</td><td><b>{money(order.invested, cur)}</b></td></tr>
-                      <tr><td colSpan={3}>Queda en efectivo</td><td>{money(order.cash, cur)}</td></tr>
-                    </tfoot>
-                  </table>
-                  <small>{`Acciones enteras al último precio semanal${order.rows.some(r => !r.shares) ? '; con poco dinero algunas acciones no llegan a 1 unidad' : ''}. Lo que no llega a una acción entera queda en efectivo.`}</small>
-                </div>}
+                  ? <Donut key="stock" title="Peso por acción" currency={cur} capital={run.capital || 0} center={stockCenter} items={stockItems}/>
+                  : <Donut key="sector" title="Peso por sector" currency={cur} capital={run.capital || 0} center={sectorCenter} items={sectorItems}/>}
               </div>
             </div>
           </section>}
@@ -643,6 +635,10 @@ window.StockScannerUI = window.StockScannerUI || {};
               <h2>Backtest · ¿habría funcionado en el pasado?</h2>
               <p>{`${run.period?.label ? 'Periodo: ' + run.period.label + '. ' : ''}La estrategia se aplica semana a semana desde ${monthYear(bt.summary.start)} con ${money(bt.summary.capital, cur)}: compra cuando se cumplen las reglas, vende cuando se cumplen las de salida, reparte el dinero según rentabilidad/riesgo y descuenta comisiones.`}</p>
             </div></header>
+            {run.capital > 0 && run.capital !== bt.summary.capital && !running && <div className="simple-rerun">
+              <span>{`Has cambiado el dinero a ${money(run.capital, cur)}; este backtest se hizo con ${money(bt.summary.capital, cur)}.`}</span>
+              <button type="button" className="simple-view" onClick={runBacktest}>{`↻ Repetir con ${money(run.capital, cur)}`}</button>
+            </div>}
             <div className="simple-result-head">
               <div className="simple-result-title">{bt.summary.headline}</div>
               <Stars n={bt.summary.stars}/>

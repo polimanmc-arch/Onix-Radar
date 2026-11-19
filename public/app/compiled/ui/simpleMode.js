@@ -77,6 +77,13 @@ window.StockScannerUI = window.StockScannerUI || {};
         const invested = spent();
         return { rows, invested, cash: capital - invested };
     }
+    // Recuadro para escribir el dinero a invertir (con puntos de miles).
+    function CapitalInput({ value, onChange, cur, label = 'Dinero a invertir:' }) {
+        return React.createElement("label", { className: "simple-capital" },
+            React.createElement("span", null, label),
+            React.createElement("input", { type: "text", inputMode: "numeric", "aria-label": `Dinero a invertir en ${cur}`, placeholder: "10.000", value: value ? value.toLocaleString('es-ES') : '', onChange: e => { const v = Number(e.target.value.replace(/\D/g, '').slice(0, 12)); onChange(Number.isFinite(v) ? v : 0); } }),
+            React.createElement("em", null, cur));
+    }
     function Stars({ n, size = 26 }) {
         return React.createElement("span", { className: "simple-stars", "aria-label": `${n} de 3 estrellas`, style: { fontSize: size } }, [0, 1, 2].map(i => React.createElement("span", { key: i, "aria-hidden": "true", className: i < n ? 'on' : 'off' }, "\u2605")));
     }
@@ -662,10 +669,7 @@ window.StockScannerUI = window.StockScannerUI || {};
                     React.createElement("p", null,
                         React.createElement("b", null, "Siguiente:"),
                         " con las mejores acciones del esc\u00E1ner, Markowitz busca el reparto del dinero con la mejor rentabilidad por unidad de riesgo."),
-                    React.createElement("label", { className: "simple-capital" },
-                        React.createElement("span", null, "Dinero a invertir:"),
-                        React.createElement("input", { type: "text", inputMode: "numeric", "aria-label": `Dinero a invertir en ${cur}`, placeholder: "10.000", value: capital ? capital.toLocaleString('es-ES') : '', onChange: e => { const v = Number(e.target.value.replace(/\D/g, '').slice(0, 12)); setCapital(Number.isFinite(v) ? v : 0); } }),
-                        React.createElement("em", null, cur)),
+                    React.createElement(CapitalInput, { value: capital, onChange: setCapital, cur: cur }),
                     React.createElement("button", { type: "button", className: "simple-play", onClick: runPortfolio, disabled: !(capital > 0) }, "\u25B6  Paso 4 \u00B7 Construir el portafolio")),
                 run.portfolioError && React.createElement("section", { id: "simple-panel-portfolio", className: "simple-panel", "aria-label": "Portafolio" },
                     React.createElement("header", null,
@@ -701,37 +705,13 @@ window.StockScannerUI = window.StockScannerUI || {};
                         React.createElement("div", { className: "simple-weights" },
                             React.createElement("div", { className: "simple-weights-head" },
                                 React.createElement("h3", null, "Reparto del dinero"),
+                                React.createElement(CapitalInput, { label: "", value: run.capital, cur: cur, onChange: v => { setCapital(v); setRun(r => ({ ...r, capital: v })); } }),
                                 React.createElement("div", { className: "simple-switch", role: "group", "aria-label": "Ver el reparto" },
                                     React.createElement("button", { type: "button", "aria-pressed": weightView === 'stock', onClick: () => setWeightView('stock') }, "Por acci\u00F3n"),
                                     React.createElement("button", { type: "button", "aria-pressed": weightView === 'sector', onClick: () => setWeightView('sector') }, "Por sector"))),
                             weightView === 'stock'
-                                ? React.createElement(Donut, { key: "stock", title: "Peso por acci\u00F3n", currency: cur, capital: run.capital || 10000, center: stockCenter, items: stockItems })
-                                : React.createElement(Donut, { key: "sector", title: "Peso por sector", currency: cur, capital: run.capital || 10000, center: sectorCenter, items: sectorItems }),
-                            weightView === 'stock' && order && React.createElement("div", { className: "simple-order" },
-                                React.createElement("h4", null, `🧾 Orden para el bróker · ${money(run.capital || 10000, cur)}`),
-                                React.createElement("table", { className: "simple-table" },
-                                    React.createElement("thead", null,
-                                        React.createElement("tr", null,
-                                            React.createElement("th", null, "Acci\u00F3n"),
-                                            React.createElement("th", null, "Precio"),
-                                            React.createElement("th", null, "Comprar"),
-                                            React.createElement("th", null, "Importe"))),
-                                    React.createElement("tbody", null, order.rows.map(r => (React.createElement("tr", { key: r.ticker },
-                                        React.createElement("td", { title: r.name },
-                                            React.createElement("b", null, r.ticker)),
-                                        React.createElement("td", null, num(r.price)),
-                                        React.createElement("td", { className: r.shares ? 'up' : 'muted' },
-                                            React.createElement("b", null, r.shares.toLocaleString('es-ES'))),
-                                        React.createElement("td", null, money(r.amount, cur)))))),
-                                    React.createElement("tfoot", null,
-                                        React.createElement("tr", null,
-                                            React.createElement("td", { colSpan: 3 }, "Total invertido"),
-                                            React.createElement("td", null,
-                                                React.createElement("b", null, money(order.invested, cur)))),
-                                        React.createElement("tr", null,
-                                            React.createElement("td", { colSpan: 3 }, "Queda en efectivo"),
-                                            React.createElement("td", null, money(order.cash, cur))))),
-                                React.createElement("small", null, `Acciones enteras al último precio semanal${order.rows.some(r => !r.shares) ? '; con poco dinero algunas acciones no llegan a 1 unidad' : ''}. Lo que no llega a una acción entera queda en efectivo.`))))),
+                                ? React.createElement(Donut, { key: "stock", title: "Peso por acci\u00F3n", currency: cur, capital: run.capital || 0, center: stockCenter, items: stockItems })
+                                : React.createElement(Donut, { key: "sector", title: "Peso por sector", currency: cur, capital: run.capital || 0, center: sectorCenter, items: sectorItems })))),
                 (pf || run.portfolioError) && !bt && !run.backtestError && !running && React.createElement("div", { className: "simple-next" },
                     React.createElement("p", null,
                         React.createElement("b", null, "Siguiente:"),
@@ -753,6 +733,9 @@ window.StockScannerUI = window.StockScannerUI || {};
                         React.createElement("div", null,
                             React.createElement("h2", null, "Backtest \u00B7 \u00BFhabr\u00EDa funcionado en el pasado?"),
                             React.createElement("p", null, `${((_d = run.period) === null || _d === void 0 ? void 0 : _d.label) ? 'Periodo: ' + run.period.label + '. ' : ''}La estrategia se aplica semana a semana desde ${monthYear(bt.summary.start)} con ${money(bt.summary.capital, cur)}: compra cuando se cumplen las reglas, vende cuando se cumplen las de salida, reparte el dinero según rentabilidad/riesgo y descuenta comisiones.`))),
+                    run.capital > 0 && run.capital !== bt.summary.capital && !running && React.createElement("div", { className: "simple-rerun" },
+                        React.createElement("span", null, `Has cambiado el dinero a ${money(run.capital, cur)}; este backtest se hizo con ${money(bt.summary.capital, cur)}.`),
+                        React.createElement("button", { type: "button", className: "simple-view", onClick: runBacktest }, `↻ Repetir con ${money(run.capital, cur)}`)),
                     React.createElement("div", { className: "simple-result-head" },
                         React.createElement("div", { className: "simple-result-title" }, bt.summary.headline),
                         React.createElement(Stars, { n: bt.summary.stars })),
