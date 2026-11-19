@@ -96,33 +96,47 @@ window.StockScannerUI = window.StockScannerUI || {};
   }
 
   // Estrategia frente al índice.
-  const SimpleChart = memo(function SimpleChart({ summary, currency, holdLabel }){
+  const COMPARE_COLORS = ['#f5a623', '#2ec4a6', '#e8577c', '#3fb8e6'];
+  const SimpleChart = memo(function SimpleChart({ summary, currency, holdLabel, compare = [] }){
     const W = 640, H = 230, padL = 58, padR = 14, padT = 12, padB = 26;
-    const a = summary.curve, b = summary.bench;
-    const all = [summary.capital, ...a.map(p => p.value), ...b.map(p => p.value)];
-    const lo = Math.min(...all) * 0.97, hi = Math.max(...all) * 1.03, rg = hi - lo || 1;
-    const t0 = a[0].time, t1 = a[a.length - 1].time, tr = (t1 - t0) || 1;
+    const pctMode = compare.length > 0;
+    // Con partidas para comparar, todo se pasa a rentabilidad en % desde su inicio (distinto dinero y periodo).
+    const norm = (pts, cap) => (pctMode ? pts.map(p => ({ time: p.time, value: p.value / cap - 1 })) : pts);
+    const a = norm(summary.curve, summary.capital), b = norm(summary.bench, summary.capital);
+    const others = compare.map(c => ({ ...c, pts: c.curve.map(p => ({ time: p.time, value: p.value / c.capital - 1 })) }));
+    const base = pctMode ? 0 : summary.capital;
+    const all = [base, ...a.map(p => p.value), ...b.map(p => p.value), ...others.flatMap(o => o.pts.map(p => p.value))];
+    const mn = Math.min(...all), mx = Math.max(...all), span = (mx - mn) || 1;
+    const lo = pctMode ? mn - span * 0.05 : mn * 0.97, hi = pctMode ? mx + span * 0.05 : mx * 1.03, rg = hi - lo || 1;
+    const times = [a[0].time, a[a.length - 1].time, ...others.flatMap(o => o.pts.length ? [o.pts[0].time, o.pts[o.pts.length - 1].time] : [])];
+    const t0 = Math.min(...times), t1 = Math.max(...times), tr = (t1 - t0) || 1;
     const x = t => padL + ((t - t0) / tr) * (W - padL - padR);
     const y = v => padT + (1 - (v - lo) / rg) * (H - padT - padB);
     const path = pts => pts.map((p, i) => (i ? 'L' : 'M') + x(p.time).toFixed(1) + ',' + y(p.value).toFixed(1)).join(' ');
-    const area = path(a) + ` L${x(t1).toFixed(1)},${(H - padB).toFixed(1)} L${x(t0).toFixed(1)},${(H - padB).toFixed(1)} Z`;
-    const ticks = [summary.capital, ...[lo + rg * 0.1, hi - rg * 0.1].filter(v => Math.abs(v - summary.capital) > rg * 0.12)];
+    const area = path(a) + ` L${x(a[a.length - 1].time).toFixed(1)},${(H - padB).toFixed(1)} L${x(a[0].time).toFixed(1)},${(H - padB).toFixed(1)} Z`;
+    const ticks = [base, ...[lo + rg * 0.1, hi - rg * 0.1].filter(v => Math.abs(v - base) > rg * 0.12)];
+    const fmtTick = v => (pctMode ? pct(v, 0) : Math.round(v).toLocaleString('es-ES'));
+    const last = pts => pts[pts.length - 1]?.value;
     return (
       <figure className="simple-chart">
-        <svg viewBox={`0 0 ${W} ${H}`} role="img" aria-label={`Evolución de ${money(summary.capital, currency)}: estrategia frente a comprar ${holdLabel}`}>
+        <svg viewBox={`0 0 ${W} ${H}`} role="img" aria-label={pctMode
+          ? `Rentabilidad en % de la estrategia frente a ${others.map(o => o.label).join(', ')}`
+          : `Evolución de ${money(summary.capital, currency)}: estrategia frente a comprar ${holdLabel}`}>
           {ticks.map(v => <g key={v}>
-            <line x1={padL} x2={W - padR} y1={y(v)} y2={y(v)} stroke="var(--border)" strokeDasharray={v === summary.capital ? '4 4' : '0'} strokeWidth="1"/>
-            <text x={padL - 8} y={y(v) + 4} textAnchor="end" fontSize="11" fill="var(--text-2)">{Math.round(v).toLocaleString('es-ES')}</text>
+            <line x1={padL} x2={W - padR} y1={y(v)} y2={y(v)} stroke="var(--border)" strokeDasharray={v === base ? '4 4' : '0'} strokeWidth="1"/>
+            <text x={padL - 8} y={y(v) + 4} textAnchor="end" fontSize="11" fill="var(--text-2)">{fmtTick(v)}</text>
           </g>)}
-          <path d={area} fill="var(--accent)" opacity="0.10"/>
-          {b.length > 1 && <path d={path(b)} fill="none" stroke="var(--text-2)" strokeWidth="2" strokeDasharray="6 4"/>}
+          {!pctMode && <path d={area} fill="var(--accent)" opacity="0.10"/>}
+          {b.length > 1 && <path d={path(b)} fill="none" stroke="var(--text-2)" strokeWidth="2" strokeDasharray="6 4" opacity={pctMode ? 0.6 : 1}/>}
+          {others.map(o => o.pts.length > 1 && <path key={o.key} d={path(o.pts)} fill="none" stroke={o.color} strokeWidth="2.2" strokeLinejoin="round"/>)}
           <path d={path(a)} fill="none" stroke="var(--accent)" strokeWidth="3" strokeLinejoin="round"/>
           <text x={padL} y={H - 6} fontSize="11" fill="var(--text-2)">{year(t0)}</text>
           <text x={W - padR} y={H - 6} fontSize="11" fill="var(--text-2)" textAnchor="end">{year(t1)}</text>
         </svg>
         <figcaption className="simple-legend">
-          <span><i style={{ background: 'var(--accent)' }}/>Estrategia</span>
-          <span><i className="dashed"/>{`Comprar ${holdLabel} y esperar`}</span>
+          <span><i style={{ background: 'var(--accent)' }}/>{pctMode ? `Esta partida ${pct(last(a))}` : 'Estrategia'}</span>
+          <span><i className="dashed"/>{`Comprar ${holdLabel} y esperar${pctMode ? ' ' + pct(last(b)) : ''}`}</span>
+          {others.map(o => <span key={o.key}><i style={{ background: o.color }}/>{`${o.label} ${pct(last(o.pts))}`}</span>)}
         </figcaption>
       </figure>
     );
@@ -314,6 +328,8 @@ window.StockScannerUI = window.StockScannerUI || {};
     const [games, setGames] = useState(loadGames);
     const [capital, setCapital] = useState(10000); // dinero a invertir (paso 4), también el del backtest
     const [rankMsg, setRankMsg] = useState(null);
+    const [compareIds, setCompareIds] = useState([]);
+    const [compareData, setCompareData] = useState({});
     const cacheRef = useRef({});
     const abortRef = useRef(null);
     useEffect(() => () => abortRef.current?.abort(), []);
@@ -470,6 +486,23 @@ window.StockScannerUI = window.StockScannerUI || {};
         prices: snap.prices, savedAt: snap.savedAt, gameId: g.id });
       scrollSoon('simple-panel-scan');
     };
+
+    // Comparar: hasta 4 partidas guardadas sobre el gráfico del backtest.
+    const toggleCompare = async g => {
+      if(compareIds.includes(g.id)){ setCompareIds(ids => ids.filter(x => x !== g.id)); return; }
+      if(compareIds.length >= 4) return;
+      if(!compareData[g.id]){
+        let snap = null; try{ snap = await loadSnapshot(g.id); }catch{}
+        const sm = snap?.backtest?.summary;
+        if(!sm?.curve?.length) return;
+        setCompareData(d => ({ ...d, [g.id]: { curve: sm.curve, capital: sm.capital } }));
+      }
+      setCompareIds(ids => (ids.includes(g.id) ? ids : [...ids, g.id]));
+    };
+    const shortGame = g => `${g.icon} ${g.strategy.replace('Estrategia base Radar Onix', 'Base')} · ${g.market} · ${g.period}`;
+    const compareList = useMemo(() => compareIds.filter(id => id !== run?.gameId && compareData[id])
+      .map((id, k) => { const g = games.find(x => x.id === id); return g && { key: id, label: shortGame(g), color: COMPARE_COLORS[k % COMPARE_COLORS.length], ...compareData[id] }; })
+      .filter(Boolean), [compareIds, compareData, games, run?.gameId]);
 
     const stageState = id => run?.[id + 'Error'] ? 'error' : run?.[id] ? 'done' : stage === id ? 'active' : 'todo';
     const ranking = [...games].sort((a, b) => b.ret - a.ret).slice(0, 10);
@@ -697,7 +730,18 @@ window.StockScannerUI = window.StockScannerUI || {};
               <div className="simple-vs">VS</div>
               <div className="simple-score"><span>{`Comprar ${run.market.holdLabel} y esperar`}</span><strong>{money(bt.summary.benchFinal, cur)}</strong><em className={(bt.summary.benchRet || 0) >= 0 ? 'up' : 'down'}>{pct(bt.summary.benchRet)}</em></div>
             </div>
-            <SimpleChart summary={bt.summary} currency={cur} holdLabel={run.market.holdLabel}/>
+            <SimpleChart summary={bt.summary} currency={cur} holdLabel={run.market.holdLabel} compare={compareList}/>
+            <div className="simple-compare" role="group" aria-label="Comparar con otras partidas">
+              <span>📊 Comparar con:</span>
+              {games.filter(g => g.saved && g.id !== run.gameId).length
+                ? games.filter(g => g.saved && g.id !== run.gameId).slice(0, 12).map(g => {
+                  const k = compareList.findIndex(c => c.key === g.id);
+                  return <button type="button" key={g.id} aria-pressed={k >= 0} onClick={() => toggleCompare(g)}
+                    disabled={k < 0 && compareIds.filter(id => id !== run.gameId).length >= 4} title={`${g.strategy} · ${g.market} · ${g.period}: ${pct(g.ret)}`}>
+                    <i style={{ background: k >= 0 ? compareList[k].color : 'transparent' }}/>{`${shortGame(g)} · ${pct(g.ret)}`}</button>;
+                })
+                : <small>Juega otras partidas (otra estrategia, mercado o periodo) y aparecerán aquí para comparar sus curvas.</small>}
+            </div>
             <div className="simple-facts simple-facts-6">
               <div><span>Rentabilidad anual</span><strong>{pct(bt.annReturn)}</strong></div>
               <div><span>Ratio de Sharpe</span><strong>{num(bt.sharpe)}</strong></div>
