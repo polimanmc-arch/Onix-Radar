@@ -11,7 +11,7 @@ const { UI_STYLES: __S } = window.StockScannerUI;
     }
     catch { }
 })();
-window.StockScannerUI.AppHeader = function AppHeader({ tab }) {
+window.StockScannerUI.AppHeader = function AppHeader({ tab, uiMode, setUiMode }) {
     const { useState } = React;
     const [isLight, setIsLight] = useState(() => {
         try {
@@ -45,8 +45,11 @@ window.StockScannerUI.AppHeader = function AppHeader({ tab }) {
                 "RADAR ",
                 React.createElement("span", null, "ONIX")),
             React.createElement("span", { className: "workspace-divider" }),
-            React.createElement("span", null, ({ scanner: 'Scanner de mercado', portfolio: 'Portafolio', backtest: 'Laboratorio de estrategias' })[tab] || 'Workspace')),
+            React.createElement("span", null, uiMode === 'simple' ? 'Simulador de estrategias' : (({ scanner: 'Scanner de mercado', portfolio: 'Portafolio', backtest: 'Laboratorio de estrategias' })[tab] || 'Workspace'))),
         React.createElement("div", { className: "workspace-header-actions" },
+            setUiMode && React.createElement("div", { className: "mode-switch", role: "group", "aria-label": "Modo de la app" },
+                React.createElement("button", { type: "button", "aria-pressed": uiMode === 'simple', onClick: () => setUiMode('simple'), title: "Simulador sencillo en 3 pasos" }, "Simple"),
+                React.createElement("button", { type: "button", "aria-pressed": uiMode !== 'simple', onClick: () => setUiMode('pro'), title: "Scanner, backtest y portafolio completos" }, "Experto")),
             React.createElement("button", { type: "button", className: "theme-button", onClick: toggleTheme, title: isLight ? 'Cambiar a tema oscuro' : 'Cambiar a tema claro', "aria-label": isLight ? 'Cambiar a tema oscuro' : 'Cambiar a tema claro' },
                 React.createElement("svg", { viewBox: "0 0 24 24", fill: "none", stroke: "currentColor", strokeWidth: "1.5", "aria-hidden": "true" }, isLight ? React.createElement("path", { d: "M20 15A9 9 0 0 1 9 4a9 9 0 1 0 11 11Z" }) : React.createElement(React.Fragment, null,
                     React.createElement("circle", { cx: "12", cy: "12", r: "4" }),

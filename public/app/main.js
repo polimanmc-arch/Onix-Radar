@@ -6,7 +6,7 @@ const { useState, useCallback, useRef, useEffect, useMemo } = React;
 const { useScannerState, usePortfolioState, useBacktestState } = window.StockScannerDomainState;
 const { runScanWorkflow, runBacktestWorkflow, buildPortfolioWorkflow } = window.StockScannerCore;
 const { createScannerSortHandler, createScannerExportHandler, createPortfolioWatchlistActions } = window.StockScannerControllers;
-const { APP_TABS, UI_STYLES: S, TF_COLORS: tfColor, AppHeader, AppNotifications, AppTabNav, SelectedChartLayer } = window.StockScannerUI;
+const { APP_TABS, UI_STYLES: S, TF_COLORS: tfColor, AppHeader, AppNotifications, AppTabNav, SelectedChartLayer, SimpleMode } = window.StockScannerUI;
 const { renderScannerTabs, renderPortfolioTab, renderBacktestTab } = window.StockScannerTabs;
 const { newFilter, newCond, newGroup } = window.StockScannerState;
 const { parsePortfolioManualTickers, savePortfolioWatchlistsToStorage, parsePortfolioCsvText, exportManualWatchlistCsv } = window.StockScannerPortfolioIO;
@@ -36,6 +36,11 @@ function App(){
   const dismissNotice = useCallback((id)=>{
     setNotices(prev=>prev.filter(n=>n.id!==id));
   }, []);
+
+  // Modo de la app: "simple" (simulador en 3 pasos) o "pro" (todas las herramientas).
+  // Quien entra por primera vez ve el modo simple.
+  const [uiMode,setUiModeState] = useState(()=>{ try{ return localStorage.getItem('onix_ui_mode')==='pro' ? 'pro' : 'simple'; }catch{ return 'simple'; } });
+  const setUiMode = useCallback(mode=>{ const next=mode==='pro'?'pro':'simple'; setUiModeState(next); try{ localStorage.setItem('onix_ui_mode',next); }catch{} }, []);
 
   const notify = useCallback(({type='info', title='', message='', timeout=6500}={})=>{
     const cleanMessage = String(message || '').trim();
@@ -977,7 +982,7 @@ function App(){
   };
 
   return (
-    <div className="app-root workspace-shell">
+    <div className={"app-root workspace-shell"+(uiMode==='simple'?' simple-shell':'')}>
       <SelectedChartLayer
         selectedChart={selectedChart} dataCacheRef={dataCacheRef}
         filters={filters} shortFilters={shortFilters}
@@ -988,13 +993,15 @@ function App(){
         onClose={()=>setSelectedChart(null)}
       />
       <AppNotifications notices={notices} dismissNotice={dismissNotice} />
-      <AppTabNav APP_TABS={APP_TABS} tab={tab} setTab={setTab} passN={passN} portfolio={portfolio} />
+      {uiMode!=='simple'&&<AppTabNav APP_TABS={APP_TABS} tab={tab} setTab={setTab} passN={passN} portfolio={portfolio} />}
       <div className="workspace-body">
-        <AppHeader tab={tab} />
+        <AppHeader tab={tab} uiMode={uiMode} setUiMode={setUiMode} />
         <main className="workspace-main" id="workspace-main">
-          {renderScannerTabs(appCtx)}
-          {renderPortfolioTab(appCtx)}
-          {renderBacktestTab(appCtx)}
+          {uiMode==='simple' ? <SimpleMode notify={notify}/> : <>
+            {renderScannerTabs(appCtx)}
+            {renderPortfolioTab(appCtx)}
+            {renderBacktestTab(appCtx)}
+          </>}
         </main>
       </div>
     </div>

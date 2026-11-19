@@ -9,7 +9,7 @@ const { UI_STYLES: __S } = window.StockScannerUI;
   }catch{}
 })();
 
-window.StockScannerUI.AppHeader = function AppHeader({ tab }) {
+window.StockScannerUI.AppHeader = function AppHeader({ tab, uiMode, setUiMode }) {
   const { useState } = React;
   const [isLight, setIsLight] = useState(()=>{
     try{ return localStorage.getItem('onix_theme') === 'light'; }catch{ return false; }
@@ -30,9 +30,13 @@ window.StockScannerUI.AppHeader = function AppHeader({ tab }) {
   return (
     <header className="workspace-header">
       <div className="workspace-title"><strong>RADAR <span>ONIX</span></strong><span className="workspace-divider"/>
-        <span>{({scanner:'Scanner de mercado',portfolio:'Portafolio',backtest:'Laboratorio de estrategias'})[tab] || 'Workspace'}</span>
+        <span>{uiMode==='simple' ? 'Simulador de estrategias' : (({scanner:'Scanner de mercado',portfolio:'Portafolio',backtest:'Laboratorio de estrategias'})[tab] || 'Workspace')}</span>
       </div>
       <div className="workspace-header-actions">
+        {setUiMode && <div className="mode-switch" role="group" aria-label="Modo de la app">
+          <button type="button" aria-pressed={uiMode==='simple'} onClick={()=>setUiMode('simple')} title="Simulador sencillo en 3 pasos">Simple</button>
+          <button type="button" aria-pressed={uiMode!=='simple'} onClick={()=>setUiMode('pro')} title="Scanner, backtest y portafolio completos">Experto</button>
+        </div>}
         <button type="button" className="theme-button" onClick={toggleTheme} title={isLight?'Cambiar a tema oscuro':'Cambiar a tema claro'} aria-label={isLight?'Cambiar a tema oscuro':'Cambiar a tema claro'}>
           <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" aria-hidden="true">{isLight?<path d="M20 15A9 9 0 0 1 9 4a9 9 0 1 0 11 11Z"/>:<><circle cx="12" cy="12" r="4"/><path d="M12 2v2m0 16v2M2 12h2m16 0h2M5 5l2 2m10 10 2 2M5 19l2-2M17 7l2-2"/></>}</svg>
         </button>

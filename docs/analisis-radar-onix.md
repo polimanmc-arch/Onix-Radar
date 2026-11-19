@@ -47,6 +47,8 @@ Mejora añadida: portafolio con modo HRP (Hierarchical Risk Parity de López de 
 
 Mejora añadida: escáneres encadenados (`public/app/core/scanChain.js`). Tras un escaneo, "Escanear sobre estas N señales" convierte las señales en el universo del siguiente paso; la barra "Cadena" muestra el embudo (universo → paso 1 → paso 2…), "Repetir cadena" vuelve a ejecutar todos los pasos desde el universo original con los filtros y la dirección guardados en cada uno, y "Volver al universo original" deshace la cadena. Si se escanea otro universo y se encadena, empieza una cadena nueva.
 
+Modo simple (interruptor "Simple / Experto" en la cabecera, junto al cambio de tema; por defecto en la primera visita): simulador en 3 pasos (`public/app/ui/simpleMode.js`, `public/app/core/simpleSimulator.js`). Mercado (Dow 30, Nasdaq 100, IBEX 35, DAX 40) → estrategia en lenguaje sencillo (Comprar en caídas, Seguir la tendencia, Momentum) → simular con 10.000 a 1 o 3 años. Muestra capital final frente a comprar el índice, gráfico, estrellas (ganar dinero, ganar al mercado, menor caída que el mercado), las acciones que hoy cumplen la estrategia y una tabla de partidas. Reutiliza el backtest semanal (sin stops) y el scanner.
+
 ## Alcance y comprobaciones
 
 Se revisaron la estructura, las entradas de la aplicación, los flujos de scanner/backtest/portafolio, la configuración de temporalidades, persistencia, servicios y cachés, rutas, compilación, pruebas e identidad visual. No es una certificación financiera ni una auditoría exhaustiva de cada interacción.

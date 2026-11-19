@@ -13,6 +13,7 @@ const files = [
   'public/app/ui/scannerTab.js',
   'public/app/ui/portfolioTab.js',
   'public/app/ui/backtestTab.js',
+  'public/app/ui/simpleMode.js',
   'public/app/main.js',
 ];
 

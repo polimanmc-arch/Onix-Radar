@@ -30,6 +30,7 @@
     ['StockScannerCore.runScanWorkflow',        window.StockScannerCore?.runScanWorkflow],
     ['StockScannerCore.runBacktestWorkflow',    window.StockScannerCore?.runBacktestWorkflow],
     ['StockScannerCore.buildPortfolioWorkflow', window.StockScannerCore?.buildPortfolioWorkflow],
+    ['StockScannerCore.buildSimpleBacktestOptions', window.StockScannerCore?.buildSimpleBacktestOptions],
     ['StockScannerCore.runWalkForward',         window.StockScannerCore?.runWalkForward],
     ['StockScannerCore.computeTearsheet',       window.StockScannerCore?.computeTearsheet],
 

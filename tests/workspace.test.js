@@ -8,7 +8,7 @@ const Renderer=require('react-test-renderer');
 const root=path.resolve(__dirname,'..');
 
 async function mountApp(options={}){
-  const storage=new Map([['onix_scanner_config_open_v1','false']]);
+  const storage=new Map([['onix_scanner_config_open_v1','false'],...(options.uiMode===null?[]:[['onix_ui_mode',options.uiMode||'pro']])]);
   let element;
   const charts=[];
   const window={addEventListener(){},removeEventListener(){},LightweightCharts:{createChart(host,options){
@@ -395,5 +395,42 @@ test('chained scans: use the signals as the next universe, show the funnel, repe
   await Renderer.act(async()=>button('Volver al universo original').props.onClick());
   assert.equal(window.scannerState.tText,'A, B, C');
   assert.equal(tree.root.findAllByProps({'aria-label':'Escaneo encadenado'}).length,0);
+  await Renderer.act(async()=>tree.unmount());
+});
+
+
+test('simple mode: first visit opens the 3-step simulator, plays a game and can switch to expert mode',async()=>{
+  const now=Math.floor(Date.now()/1000);
+  const chart=t=>{
+    const n=200, seed=t.charCodeAt(0)%5, timestamp=Array.from({length:n},(_,i)=>now-(n-1-i)*604800);
+    let p=50; const c=timestamp.map((_,i)=>{ const k=(i+seed)%9; p*=k===7||k===8?0.95:1.02; return +p.toFixed(2); });
+    return {chart:{result:[{timestamp,indicators:{quote:[{open:c,high:c.map(x=>x*1.03),low:c.map(x=>x*0.995),close:c,volume:c.map(()=>1e6)}]}}]}};
+  };
+  const fetch=async(url,opts)=>{
+    const u=String(url);
+    if(u.includes('/api/charts')&&opts?.method==='POST'){ const {symbols}=JSON.parse(opts.body); return {ok:true,json:async()=>({ok:true,results:Object.fromEntries(symbols.map(s=>[s,chart(s)]))})}; }
+    const m=u.match(/\/api\/chart\/([^?]+)/);
+    if(m) return {ok:true,json:async()=>chart(decodeURIComponent(m[1]))};
+    return {ok:true,json:async()=>({})};
+  };
+  const {tree,window}=await mountApp({fetch,uiMode:null});
+  const json=()=>JSON.stringify(tree.toJSON());
+  assert.equal(tree.root.findAllByProps({className:'workspace-rail'}).length,0,'no sidebar in simple mode');
+  assert.ok(json().includes('Simulador de estrategias'));
+  const text=n=>n.children.map(ch=>typeof ch==='string'?ch:text(ch)).join('');
+  const btn=label=>tree.root.find(n=>n.type==='button'&&text(n).includes(label));
+  assert.equal(btn('Elige una estrategia').props.disabled,true);
+  await Renderer.act(async()=>btn('Seguir la tendencia').props.onClick());
+  await Renderer.act(async()=>btn('1 año').props.onClick());
+  await Renderer.act(async()=>{ await btn('Simular con 10.000').props.onClick(); });
+  const result=tree.root.findAllByProps({'aria-label':'Resultado de la simulación'});
+  assert.equal(result.length,1,'result shown');
+  assert.ok(json().includes('Tu estrategia')&&json().includes('Comprar el Dow Jones 30 y esperar'));
+  assert.equal(tree.root.findAllByProps({className:'simple-stars'}).length>=1,true);
+  assert.equal(tree.root.findAllByProps({'aria-label':'Tus partidas'}).length,1);
+  // Cambiar a modo experto muestra la app completa y se recuerda.
+  await Renderer.act(async()=>tree.root.find(n=>n.type==='button'&&n.children.join('')==='Experto').props.onClick());
+  assert.equal(tree.root.findAllByProps({className:'workspace-rail'}).length,1);
+  assert.equal(window.localStorage?.getItem?.('onix_ui_mode') ?? 'pro','pro');
   await Renderer.act(async()=>tree.unmount());
 });
