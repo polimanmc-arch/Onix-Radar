@@ -86,8 +86,8 @@ window.StockScannerUI = window.StockScannerUI || {};
   }
 
   // Contacto del autor (vacío = sin botón).
-  const AUTHOR_LINKEDIN = '';
-  const AUTHOR_EMAIL = '';
+  const AUTHOR_LINKEDIN = 'https://www.linkedin.com/in/diego-rafael-santos-de-la-rosa-56635220b/';
+  const AUTHOR_EMAIL = 'diegosantosdelarosa@gmail.com';
 
   function Stars({ n, size = 26 }){
     return <span className="simple-stars" aria-label={`${n} de 3 estrellas`} style={{ fontSize: size }}>

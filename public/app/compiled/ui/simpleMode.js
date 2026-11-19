@@ -96,8 +96,8 @@ window.StockScannerUI = window.StockScannerUI || {};
             React.createElement("small", null, value > 3 ? 'descarga 10 años de precios' : `máx. ${max}`));
     }
     // Contacto del autor (vacío = sin botón).
-    const AUTHOR_LINKEDIN = '';
-    const AUTHOR_EMAIL = '';
+    const AUTHOR_LINKEDIN = 'https://www.linkedin.com/in/diego-rafael-santos-de-la-rosa-56635220b/';
+    const AUTHOR_EMAIL = 'diegosantosdelarosa@gmail.com';
     function Stars({ n, size = 26 }) {
         return React.createElement("span", { className: "simple-stars", "aria-label": `${n} de 3 estrellas`, style: { fontSize: size } }, [0, 1, 2].map(i => React.createElement("span", { key: i, "aria-hidden": "true", className: i < n ? 'on' : 'off' }, "\u2605")));
     }
