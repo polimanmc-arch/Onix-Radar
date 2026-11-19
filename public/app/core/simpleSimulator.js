@@ -18,7 +18,9 @@
       { id: 'SP500', preset: 'SP500', name: 'S&P 500', benchmark: 'SPY', holdLabel: 'el S&P 500 (SPY)', currency: '$' },
       { id: 'DOW30', preset: 'DOW30', name: 'Dow Jones 30', benchmark: 'DIA', holdLabel: 'el Dow Jones (DIA)', currency: '$' },
       { id: 'NASDAQ100', preset: 'NASDAQ100', name: 'Nasdaq 100', benchmark: 'QQQ', holdLabel: 'el Nasdaq 100 (QQQ)', currency: '$' },
-      { id: 'RUSSELL2000_TOP', preset: 'RUSSELL2000_TOP', name: 'Russell 2000 (top 25)', benchmark: 'IWM', holdLabel: 'el Russell 2000 (IWM)', currency: '$' },
+      // Las ~2.000 empresas del índice (puestos 1.001-3.000 por capitalización); si no se puede descargar la lista, el top 25.
+      { id: 'RUSSELL2000', dynamic: 'russell2000', preset: 'RUSSELL2000_TOP', approx: 2000, name: 'Russell 2000', benchmark: 'IWM', holdLabel: 'el Russell 2000 (IWM)', currency: '$',
+        note: 'las ~2.000 empresas pequeñas de EE. UU. (puestos 1.001 a 3.000 por capitalización, método del índice con datos de hoy)' },
       { id: 'ALL', preset: 'ALL', name: 'Todas las americanas', benchmark: 'SPY', holdLabel: 'el S&P 500 (SPY)', currency: '$' },
     ]},
     { id: 'eu', icon: '🏰', name: 'Europa', blurb: 'Los grandes índices europeos', options: [
@@ -154,6 +156,12 @@
   };
   const universeReady = market => !market.dynamic || !!dynamicLists[market.id];
   async function resolveUniverse(market, fetchImpl = (u, o) => fetch(u, o)){
+    if(market.dynamic === 'russell2000' && !dynamicLists[market.id]){
+      const json = await fetchImpl('/api/tickers/russell2000').then(r => r.json()).catch(() => ({}));
+      const list = Array.isArray(json?.tickers) ? json.tickers.map(t => String(t).toUpperCase()).filter(Boolean) : [];
+      if(list.length < 1500) throw new Error('No se pudo descargar la lista del Russell 2000. Inténtalo de nuevo.');
+      dynamicLists[market.id] = uniqList(list);
+    }
     if(market.dynamic === 'allUs' && !dynamicLists[market.id]){
       const cfg = window.StockScannerConfig || {};
       const json = await fetchImpl('/api/tickers').then(r => r.json()).catch(() => ({}));
@@ -166,7 +174,7 @@
   // Lista explícita cuando el universo es propio, tiene exclusiones o es enorme: así el backtest usa
   // exactamente los mismos activos que el escáner (el preset "Universo completo" del modo experto
   // añade además todas las acciones de EE. UU. del Nasdaq).
-  const explicitUniverse = market => !!(market.tickers || market.exclude || market.heavy);
+  const explicitUniverse = market => !!(market.tickers || market.exclude || market.heavy || market.dynamic);
 
   function buildSimpleBacktestOptions({ market, strategy, period, capital = CAPITAL, weighting = 'markowitz' }){
     const equal = weighting === 'equal';
@@ -358,6 +366,7 @@
       results: candidates.slice(0, CANDIDATES).map(r => ({ ticker: r.ticker, name: r.ticker, passed: true, direction: 'LONG' })),
       filters: withIds(strategy.entry), shortFilters: [],
       // Igual para todas: 1/n por acción (sin el tope de 25 %, para que con pocas acciones también sea igual).
+      pfSkipSparklines: true,
       pfCapital: capital, pfMinWeight: equal ? 0 : 2, pfMaxWeight: equal ? 100 : 25, pfMaxPos: 10, pfRiskFree: 3,
       pfCorFilter: true, pfCorThresh: 0.85, pfMode: equal ? 'equalweight' : 'maxsharpe', pfSims: 10000, pfSeed: 42,
       pfStopType: 'none', pfStopATRMult: 2, pfStopATRPeriod: 14, pfStopPctVal: 8,

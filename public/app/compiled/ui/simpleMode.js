@@ -107,6 +107,70 @@ window.StockScannerUI = window.StockScannerUI || {};
             React.createElement("button", { type: "button", "aria-pressed": value !== 'equal', onClick: () => onChange('markowitz'), disabled: disabled }, "Markowitz"),
             React.createElement("button", { type: "button", "aria-pressed": value === 'equal', onClick: () => onChange('equal'), disabled: disabled }, "Igual para todas"));
     }
+    // Cronómetro propio: el segundo a segundo no vuelve a pintar toda la página.
+    function Elapsed({ since }) {
+        const [, tick] = useState(0);
+        useEffect(() => {
+            if (!since || typeof setInterval !== 'function')
+                return undefined;
+            const id = setInterval(() => tick(t => t + 1), 1000);
+            return () => clearInterval(id);
+        }, [since]);
+        return React.createElement(React.Fragment, null, `${since ? Math.max(0, Math.round((Date.now() - since) / 1000)) : 0} s`);
+    }
+    // Lista del escáner (puede tener cientos de filas).
+    const ScanTable = memo(function ScanTable({ rows, columns, selected, inPortfolio, onSelect }) {
+        const fmtCol = (v, fmt) => fmt === 'pct' ? pct(v) : fmt === 'num' ? num(v, 1) : (v !== null && v !== void 0 ? v : '—');
+        return React.createElement("table", { className: "simple-table simple-table-pick" },
+            React.createElement("thead", null,
+                React.createElement("tr", null,
+                    React.createElement("th", null, "Acci\u00F3n"),
+                    React.createElement("th", null, "Precio"),
+                    React.createElement("th", null, "Semana"),
+                    columns.map(col => React.createElement("th", { key: col.label, title: col.hint }, col.label)),
+                    React.createElement("th", { title: "Rentabilidad por unidad de riesgo en el \u00FAltimo a\u00F1o" }, "Sharpe 1a"),
+                    React.createElement("th", { title: "Elegida por el optimizador de Markowitz" }, "Cartera"))),
+            React.createElement("tbody", null, rows.map(r => (React.createElement("tr", { key: r.ticker, tabIndex: 0, "aria-selected": r.ticker === selected, className: r.ticker === selected ? 'sel' : '', onClick: () => onSelect(r.ticker), onKeyDown: e => { if (e.key === 'Enter' || e.key === ' ') {
+                    e.preventDefault();
+                    onSelect(r.ticker);
+                } } },
+                React.createElement("td", { className: "tk", title: r.ticker },
+                    React.createElement("b", null, r.ticker)),
+                React.createElement("td", null, r.price >= 1000 ? Math.round(r.price).toLocaleString('es-ES') : num(r.price)),
+                React.createElement("td", { className: r.chg >= 0 ? 'up' : 'down' }, pct(r.chg)),
+                r.values.map((v, k) => React.createElement("td", { key: k }, fmtCol(v, columns[k].fmt))),
+                React.createElement("td", null, num(r.sharpe1y)),
+                React.createElement("td", null, inPortfolio.has(r.ticker) && React.createElement("span", { className: "simple-tag", title: "En cartera", "aria-label": "En cartera" }, "\u2713")))))));
+    });
+    // Operaciones del backtest (pueden ser cientos).
+    const TradesTable = memo(function TradesTable({ trades, cur, onOpen }) {
+        return React.createElement("table", { className: "simple-table" },
+            React.createElement("thead", null,
+                React.createElement("tr", null,
+                    React.createElement("th", null, "Acci\u00F3n"),
+                    React.createElement("th", null, "Compra"),
+                    React.createElement("th", null, "Precio compra"),
+                    React.createElement("th", null, "Venta"),
+                    React.createElement("th", null, "Precio venta"),
+                    React.createElement("th", null, "Semanas"),
+                    React.createElement("th", null, "Resultado"),
+                    React.createElement("th", null, "Ganancia"),
+                    React.createElement("th", null, "Motivo de la venta"))),
+            React.createElement("tbody", null, trades.map((t, i) => (React.createElement("tr", { key: i, tabIndex: 0, className: "clickable", title: "Ver esta operaci\u00F3n en el gr\u00E1fico", onClick: () => onOpen(t), onKeyDown: e => { if (e.key === 'Enter' || e.key === ' ') {
+                    e.preventDefault();
+                    onOpen(t);
+                } } },
+                React.createElement("td", null,
+                    React.createElement("b", null, t.ticker)),
+                React.createElement("td", null, dayMonthYear(t.entryTime)),
+                React.createElement("td", null, num(t.entryPrice)),
+                React.createElement("td", null, dayMonthYear(t.exitTime)),
+                React.createElement("td", null, num(t.exitPrice)),
+                React.createElement("td", null, t.weeks),
+                React.createElement("td", { className: t.returnPct >= 0 ? 'up' : 'down' }, pct(t.returnPct / 100)),
+                React.createElement("td", { className: t.pnl >= 0 ? 'up' : 'down' }, money(t.pnl, cur)),
+                React.createElement("td", { className: "why", title: t.reason }, exitReason(t.reason)))))));
+    });
     function Stars({ n, size = 26 }) {
         return React.createElement("span", { className: "simple-stars", "aria-label": `${n} de 3 estrellas`, style: { fontSize: size } }, [0, 1, 2].map(i => React.createElement("span", { key: i, "aria-hidden": "true", className: i < n ? 'on' : 'off' }, "\u2605")));
     }
@@ -215,7 +279,7 @@ window.StockScannerUI = window.StockScannerUI || {};
     };
     const MA_COLORS = { WMA: 'var(--amber, #f80)', SMA: 'var(--accent, #09f)', EMA: 'var(--purple, #c6f)' };
     const OSC_COLORS = ['#4cc9f0', '#f472b6', '#a3e635'];
-    const SimpleCandles = memo(function SimpleCandles({ ticker, data, strategy, row, currency }) {
+    const SimpleCandles = memo(function SimpleCandles({ ticker, data, strategy, row, currency, focus = null }) {
         const host = useRef(null);
         const oscRefs = useRef([]);
         const [ok, setOk] = useState(true);
@@ -237,7 +301,7 @@ window.StockScannerUI = window.StockScannerUI || {};
                     return { time, open: (_b = (_a = data.opens) === null || _a === void 0 ? void 0 : _a[k]) !== null && _b !== void 0 ? _b : data.closes[k], high: data.highs[k], low: data.lows[k], close: data.closes[k] };
                 });
                 chart = renderer.buildPriceChart(host.current, data, times, candles, {
-                    activeFilters: strategy.entry, activeEntryRules: [], activeExitRules: [], chartTf: '1wk', backtestTrades: [],
+                    activeFilters: strategy.entry, activeEntryRules: [], activeExitRules: [], chartTf: '1wk', backtestTrades: focus ? [focus] : [],
                     showExitInfo: false, showVolume: true, showIndicators: true, quietLabels: true, setCrossInfo: () => { }, priceHeight: host.current.clientHeight || 300,
                 });
                 // Un solo panel con todos los osciladores (líneas finas), con el nivel de compra de cada uno y los de venta.
@@ -251,7 +315,13 @@ window.StockScannerUI = window.StockScannerUI || {};
                 }
                 // Misma anchura de escala en todos los paneles para que las fechas queden alineadas; sólo el último muestra el eje de fechas.
                 [chart, ...oscCharts].forEach((ch, i, arr) => ch.applyOptions({ rightPriceScale: { minimumWidth: 78 }, timeScale: { visible: i === arr.length - 1 } }));
-                if (times.length > 104)
+                if (focus) {
+                    // Vista centrada en la operación: ~6 meses antes de la compra y ~3 después de la venta.
+                    const at = t => { const k = times.findIndex(x => x >= t); return k < 0 ? times.length - 1 : k; };
+                    const a = at(focus.entryTime), b = at(focus.exitTime || focus.entryTime);
+                    chart.timeScale().setVisibleLogicalRange({ from: Math.max(0, a - 26), to: Math.min(times.length + 2, b + 13) });
+                }
+                else if (times.length > 104)
                     chart.timeScale().setVisibleLogicalRange({ from: times.length - 104, to: times.length + 2 });
                 ro = new ResizeObserver(() => {
                     if (!host.current)
@@ -268,7 +338,7 @@ window.StockScannerUI = window.StockScannerUI || {};
                 setOk(false);
             }
             return () => { ro === null || ro === void 0 ? void 0 : ro.disconnect(); oscCharts.forEach(oc => renderer.disposeChart(oc)); renderer.disposeChart(chart); };
-        }, [ticker, data, strategy, oscFilters]);
+        }, [ticker, data, strategy, oscFilters, focus]);
         // Medias dibujadas sobre las velas (mismo orden y color que en el gráfico): las de la regla
         // en su color y las de comparación en gris discontinuo.
         const isMa = f => f && ['WMA', 'SMA', 'EMA'].includes(f.ind);
@@ -284,7 +354,7 @@ window.StockScannerUI = window.StockScannerUI || {};
                     React.createElement("strong", null, ticker),
                     row && React.createElement("span", null, `${num(row.price)} ${currencyOf(ticker, currency)}`.trim()),
                     row && React.createElement("em", { className: row.chg >= 0 ? 'up' : 'down' }, pct(row.chg))),
-                React.createElement("small", null, "Velas semanales \u00B7 \u00FAltimos 2 a\u00F1os")),
+                React.createElement("small", null, focus ? 'Velas semanales · la operación: ▲ compra, ▼ venta' : 'Velas semanales · últimos 2 años')),
             React.createElement("div", { className: "simple-candles-wrap" },
                 maLegend.length > 0 && React.createElement("span", { className: "simple-osc-label simple-ma-label" }, maLegend.map(m => React.createElement("span", { key: m.label },
                     React.createElement("i", { className: m.cmp ? 'cmp' : '', style: { background: m.color } }),
@@ -347,7 +417,6 @@ window.StockScannerUI = window.StockScannerUI || {};
         const [progress, setProgress] = useState('');
         const [progressPct, setProgressPct] = useState(null);
         const [startedAt, setStartedAt] = useState(null);
-        const [, setTick] = useState(0);
         const [run, setRun] = useState(null);
         const [error, setError] = useState(null);
         const [games, setGames] = useState(loadGames);
@@ -355,13 +424,33 @@ window.StockScannerUI = window.StockScannerUI || {};
         const [rankMsg, setRankMsg] = useState(null);
         const [compareIds, setCompareIds] = useState([]);
         const [weighting, setWeighting] = useState('markowitz'); // reparto del portafolio y del backtest
-        const [modalTicker, setModalTicker] = useState(null); // acción abierta desde la dona
+        const [modalTicker, setModalTicker] = useState(null); // acción abierta desde la dona o una operación
+        const [modalTrade, setModalTrade] = useState(null);
+        const [modalVer, setModalVer] = useState(0); // fuerza volver a pintar cuando llegan precios
+        const closeModal = () => { setModalTicker(null); setModalTrade(null); };
+        const openStock = t => { setModalTrade(null); setModalTicker(t); };
+        // Abrir una operación: si faltan precios de esas fechas (p. ej. backtest de 8 años) se descargan.
+        const openTrade = async (t) => {
+            var _a, _b;
+            setModalTrade(t);
+            setModalTicker(t.ticker);
+            const have = ((_a = run === null || run === void 0 ? void 0 : run.prices) === null || _a === void 0 ? void 0 : _a[t.ticker]) || ((_b = cacheRef.current[t.ticker]) === null || _b === void 0 ? void 0 : _b['1wk']);
+            const oldest = (have === null || have === void 0 ? void 0 : have.ok) ? have.times[have.times.length - 1] : Infinity;
+            if (!(have === null || have === void 0 ? void 0 : have.ok) || oldest > t.entryTime - 26 * 7 * 86400) {
+                try {
+                    const old = t.entryTime < Date.now() / 1000 - 4.4 * 365 * 86400; // más de ~4,4 años: hacen falta 10 años de velas
+                    await C.loadSimpleWeekly({ tickers: [t.ticker], cacheRef, range: old ? '10y' : null });
+                }
+                catch { }
+                setModalVer(v => v + 1);
+            }
+        };
         const modalClose = useRef(null);
         useEffect(() => {
             if (!modalTicker || typeof document === 'undefined')
                 return undefined;
             const onKey = e => { if (e.key === 'Escape')
-                setModalTicker(null); };
+                closeModal(); };
             document.addEventListener('keydown', onKey);
             setTimeout(() => { var _a, _b; return (_b = (_a = modalClose.current) === null || _a === void 0 ? void 0 : _a.focus) === null || _b === void 0 ? void 0 : _b.call(_a); }, 30);
             return () => document.removeEventListener('keydown', onKey);
@@ -370,13 +459,6 @@ window.StockScannerUI = window.StockScannerUI || {};
         const cacheRef = useRef({});
         const abortRef = useRef(null);
         useEffect(() => () => { var _a; return (_a = abortRef.current) === null || _a === void 0 ? void 0 : _a.abort(); }, []);
-        // Cronómetro visible mientras corre el análisis (para ver que sigue trabajando).
-        useEffect(() => {
-            if (!startedAt || typeof setInterval !== 'function')
-                return undefined;
-            const id = setInterval(() => setTick(t => t + 1), 1000);
-            return () => clearInterval(id);
-        }, [startedAt]);
         const market = markets.find(m => m.id === marketId);
         const group = groups.find(g => g.id === (market === null || market === void 0 ? void 0 : market.group)) || groups[0];
         // Precarga: al elegir un mercado (y al entrar, con el S&P 500) se empiezan a descargar sus precios
@@ -625,7 +707,13 @@ window.StockScannerUI = window.StockScannerUI || {};
         const medal = i => ['🥇', '🥈', '🥉'][i] || `${i + 1}.`;
         const cur = (_a = run === null || run === void 0 ? void 0 : run.market) === null || _a === void 0 ? void 0 : _a.currency;
         const scan = run === null || run === void 0 ? void 0 : run.scan, pf = run === null || run === void 0 ? void 0 : run.portfolio, bt = run === null || run === void 0 ? void 0 : run.backtest;
-        const inPortfolio = new Set(((pf === null || pf === void 0 ? void 0 : pf.allocations) || []).map(a => a.ticker));
+        const inPortfolio = useMemo(() => new Set(((pf === null || pf === void 0 ? void 0 : pf.allocations) || []).map(a => a.ticker)), [pf]);
+        const scanRows = useMemo(() => { var _a; return (((_a = run === null || run === void 0 ? void 0 : run.scan) === null || _a === void 0 ? void 0 : _a.passing) || []).slice(0, 1000); }, [run === null || run === void 0 ? void 0 : run.scan]);
+        // Funciones estables (no cambian entre pintadas) para que las tablas memo no se repinten.
+        const openTradeRef = useRef(null);
+        const onOpenTrade = useMemo(() => t => { var _a; return (_a = openTradeRef.current) === null || _a === void 0 ? void 0 : _a.call(openTradeRef, t); }, []);
+        openTradeRef.current = openTrade;
+        const onSelectRow = useMemo(() => t => setSelTicker(t), []);
         const selected = (scan === null || scan === void 0 ? void 0 : scan.passing.some(r => r.ticker === selTicker)) ? selTicker : (_b = scan === null || scan === void 0 ? void 0 : scan.passing[0]) === null || _b === void 0 ? void 0 : _b.ticker;
         const order = useMemo(() => (pf ? brokerOrder(pf.allocations, (run === null || run === void 0 ? void 0 : run.capital) || 10000) : null), [pf, run === null || run === void 0 ? void 0 : run.capital]);
         const stockItems = useMemo(() => {
@@ -660,12 +748,20 @@ window.StockScannerUI = window.StockScannerUI || {};
             modalTicker && run && (() => {
                 var _a, _b, _c;
                 const it = stockItems.find(x => x.key === modalTicker);
-                const data = ((_a = run.prices) === null || _a === void 0 ? void 0 : _a[modalTicker]) || ((_b = cacheRef.current[modalTicker]) === null || _b === void 0 ? void 0 : _b['1wk']);
+                const cached = (_a = cacheRef.current[modalTicker]) === null || _a === void 0 ? void 0 : _a['1wk'];
+                const data = (modalTrade && (cached === null || cached === void 0 ? void 0 : cached.ok)) ? cached : (((_b = run.prices) === null || _b === void 0 ? void 0 : _b[modalTicker]) || cached);
+                const tr = modalTrade;
                 return React.createElement("div", { className: "simple-modal-back", role: "presentation", onClick: e => { if (e.target === e.currentTarget)
-                        setModalTicker(null); } },
+                        closeModal(); } },
                     React.createElement("div", { className: "simple-modal", role: "dialog", "aria-modal": "true", "aria-label": `Gráfico de ${modalTicker}` },
-                        React.createElement("button", { type: "button", ref: modalClose, className: "simple-modal-close", onClick: () => setModalTicker(null), "aria-label": "Cerrar" }, "\u00D7"),
-                        it && React.createElement("div", { className: "simple-modal-facts" },
+                        React.createElement("button", { type: "button", ref: modalClose, className: "simple-modal-close", onClick: closeModal, "aria-label": "Cerrar" }, "\u00D7"),
+                        tr ? React.createElement("div", { className: "simple-modal-facts simple-modal-trade" },
+                            React.createElement("span", null, `▲ Compra ${dayMonthYear(tr.entryTime)} a ${num(tr.entryPrice)} ${cur}`),
+                            React.createElement("span", null, `▼ Venta ${dayMonthYear(tr.exitTime)} a ${num(tr.exitPrice)} ${cur}`),
+                            React.createElement("span", { className: tr.returnPct >= 0 ? 'up' : 'down' },
+                                React.createElement("b", null, pct(tr.returnPct / 100)),
+                                ` · ${money(tr.pnl, cur)}`),
+                            React.createElement("span", null, `${tr.weeks} semana${tr.weeks === 1 ? '' : 's'} · ${exitReason(tr.reason)}`)) : it && React.createElement("div", { className: "simple-modal-facts" },
                             it.sub && React.createElement("span", null, it.sub),
                             React.createElement("span", null,
                                 React.createElement("b", null, pct(it.weight, 1, false)),
@@ -675,8 +771,8 @@ window.StockScannerUI = window.StockScannerUI || {};
                             it.shares != null && React.createElement("span", null,
                                 React.createElement("b", null, it.shares.toLocaleString('es-ES')),
                                 ` acci${it.shares === 1 ? 'ón' : 'ones'} a ${num(it.price)} ${cur}`)),
-                        (data === null || data === void 0 ? void 0 : data.ok) ? React.createElement(SimpleCandles, { ticker: modalTicker, data: data, strategy: run.strategy, currency: cur, row: (_c = run.scan) === null || _c === void 0 ? void 0 : _c.passing.find(r => r.ticker === modalTicker) })
-                            : React.createElement("p", { className: "simple-note" }, "No hay precios guardados de esta acci\u00F3n.")));
+                        (data === null || data === void 0 ? void 0 : data.ok) ? React.createElement(SimpleCandles, { key: modalTicker + modalVer, ticker: modalTicker, data: data, strategy: run.strategy, currency: cur, focus: tr, row: (_c = run.scan) === null || _c === void 0 ? void 0 : _c.passing.find(r => r.ticker === modalTicker) })
+                            : React.createElement("p", { className: "simple-note" }, "Cargando los precios de esta acci\u00F3n\u2026")));
             })(),
             React.createElement("section", { className: "simple-hero" },
                 React.createElement("h1", null, "Radar Onix \u00B7 Simulador de inversi\u00F3n"),
@@ -787,26 +883,8 @@ window.StockScannerUI = window.StockScannerUI || {};
                     scan.passing.length ? React.createElement("div", { className: "simple-scan-grid" },
                         React.createElement("div", { className: "simple-scan-left" },
                             React.createElement("div", { className: "simple-table-wrap simple-table-scroll", tabIndex: 0, "aria-label": "Acciones que cumplen la estrategia" },
-                                React.createElement("table", { className: "simple-table simple-table-pick" },
-                                    React.createElement("thead", null,
-                                        React.createElement("tr", null,
-                                            React.createElement("th", null, "Acci\u00F3n"),
-                                            React.createElement("th", null, "Precio"),
-                                            React.createElement("th", null, "Semana"),
-                                            run.strategy.columns.map(col => React.createElement("th", { key: col.label, title: col.hint }, col.label)),
-                                            React.createElement("th", { title: "Rentabilidad por unidad de riesgo en el \u00FAltimo a\u00F1o" }, "Sharpe 1a"),
-                                            React.createElement("th", { title: "Elegida por el optimizador de Markowitz" }, "Cartera"))),
-                                    React.createElement("tbody", null, scan.passing.slice(0, 1000).map((r, i) => (React.createElement("tr", { key: r.ticker, tabIndex: 0, "aria-selected": r.ticker === selected, className: r.ticker === selected ? 'sel' : '', onClick: () => setSelTicker(r.ticker), onKeyDown: e => { if (e.key === 'Enter' || e.key === ' ') {
-                                            e.preventDefault();
-                                            setSelTicker(r.ticker);
-                                        } } },
-                                        React.createElement("td", { className: "tk", title: r.ticker },
-                                            React.createElement("b", null, r.ticker)),
-                                        React.createElement("td", null, r.price >= 1000 ? Math.round(r.price).toLocaleString('es-ES') : num(r.price)),
-                                        React.createElement("td", { className: r.chg >= 0 ? 'up' : 'down' }, pct(r.chg)),
-                                        r.values.map((v, k) => React.createElement("td", { key: k }, fmtCol(v, run.strategy.columns[k].fmt))),
-                                        React.createElement("td", null, num(r.sharpe1y)),
-                                        React.createElement("td", null, inPortfolio.has(r.ticker) && React.createElement("span", { className: "simple-tag", title: "En cartera", "aria-label": "En cartera" }, "\u2713")))))))),
+                                React.createElement(ScanTable, { rows: scanRows, columns: run.strategy.columns, selected: selected, inPortfolio: inPortfolio, onSelect: onSelectRow }),
+                                "              "),
                             React.createElement("p", { className: "simple-note" }, `${scan.passing.length} acciones · haz clic en una fila para ver su gráfico${scan.passing.length > 10 ? ' (usa la rueda del ratón para ver más)' : ''}. Las ${Math.min(scan.passing.length, C.SIMPLE_CANDIDATES)} con mejor Sharpe del último año pasan al optimizador.`)),
                         selected && React.createElement(SimpleCandles, { ticker: selected, data: run.prices ? run.prices[selected] : (_c = cacheRef.current[selected]) === null || _c === void 0 ? void 0 : _c['1wk'], strategy: run.strategy, currency: cur, row: scan.passing.find(r => r.ticker === selected) }))
                         : React.createElement("p", { className: "simple-note" }, "Hoy ninguna acci\u00F3n del mercado cumple las reglas: la estrategia esperar\u00EDa.")),
@@ -864,7 +942,7 @@ window.StockScannerUI = window.StockScannerUI || {};
                                     React.createElement("button", { type: "button", "aria-pressed": weightView === 'stock', onClick: () => setWeightView('stock') }, "Por acci\u00F3n"),
                                     React.createElement("button", { type: "button", "aria-pressed": weightView === 'sector', onClick: () => setWeightView('sector') }, "Por sector"))),
                             weightView === 'stock'
-                                ? React.createElement(Donut, { key: "stock", title: "Peso por acci\u00F3n", currency: cur, capital: run.capital || 0, center: stockCenter, items: stockItems, onPick: setModalTicker })
+                                ? React.createElement(Donut, { key: "stock", title: "Peso por acci\u00F3n", currency: cur, capital: run.capital || 0, center: stockCenter, items: stockItems, onPick: openStock })
                                 : React.createElement(Donut, { key: "sector", title: "Peso por sector", currency: cur, capital: run.capital || 0, center: sectorCenter, items: sectorItems })))),
                 (pf || run.portfolioError) && !bt && !run.backtestError && !running && React.createElement("div", { className: "simple-next" },
                     React.createElement("p", null,
@@ -943,31 +1021,11 @@ window.StockScannerUI = window.StockScannerUI || {};
                             React.createElement("span", null, "Comisiones pagadas"),
                             React.createElement("strong", null, money(bt.commissions, cur)))),
                     ((_e = bt.trades) === null || _e === void 0 ? void 0 : _e.length) > 0 && React.createElement("div", { className: "simple-trades" },
-                        React.createElement("h3", null, `📋 Operaciones realizadas · ${bt.trades.length}`),
+                        React.createElement("h3", null,
+                            `📋 Operaciones realizadas · ${bt.trades.length}`,
+                            React.createElement("small", null, " \u00B7 pulsa una para verla en el gr\u00E1fico")),
                         React.createElement("div", { className: "simple-table-wrap simple-trades-scroll", tabIndex: 0, "aria-label": "Operaciones del backtest" },
-                            React.createElement("table", { className: "simple-table" },
-                                React.createElement("thead", null,
-                                    React.createElement("tr", null,
-                                        React.createElement("th", null, "Acci\u00F3n"),
-                                        React.createElement("th", null, "Compra"),
-                                        React.createElement("th", null, "Precio compra"),
-                                        React.createElement("th", null, "Venta"),
-                                        React.createElement("th", null, "Precio venta"),
-                                        React.createElement("th", null, "Semanas"),
-                                        React.createElement("th", null, "Resultado"),
-                                        React.createElement("th", null, "Ganancia"),
-                                        React.createElement("th", null, "Motivo de la venta"))),
-                                React.createElement("tbody", null, bt.trades.map((t, i) => (React.createElement("tr", { key: i },
-                                    React.createElement("td", null,
-                                        React.createElement("b", null, t.ticker)),
-                                    React.createElement("td", null, dayMonthYear(t.entryTime)),
-                                    React.createElement("td", null, num(t.entryPrice)),
-                                    React.createElement("td", null, dayMonthYear(t.exitTime)),
-                                    React.createElement("td", null, num(t.exitPrice)),
-                                    React.createElement("td", null, t.weeks),
-                                    React.createElement("td", { className: t.returnPct >= 0 ? 'up' : 'down' }, pct(t.returnPct / 100)),
-                                    React.createElement("td", { className: t.pnl >= 0 ? 'up' : 'down' }, money(t.pnl, cur)),
-                                    React.createElement("td", { className: "why", title: t.reason }, exitReason(t.reason))))))))),
+                            React.createElement(TradesTable, { trades: bt.trades, cur: cur, onOpen: onOpenTrade }))),
                     React.createElement("div", { className: "simple-stars-help" },
                         React.createElement("span", null, "\u2B50 ganar dinero"),
                         React.createElement("span", null, "\u2B50 ganar al mercado"),
@@ -977,7 +1035,9 @@ window.StockScannerUI = window.StockScannerUI || {};
                     React.createElement("div", { className: "simple-loading-body" },
                         React.createElement("div", { className: "simple-loading-top" },
                             React.createElement("b", null, `Paso ${{ scan: 3, portfolio: 4, backtest: 5 }[stage]} de 5 · ${(STAGES.find(x => x.id === stage) || {}).label || ''}`),
-                            React.createElement("span", null, `${progressPct != null ? Math.round(progressPct) + ' % · ' : ''}${startedAt ? Math.max(0, Math.round((Date.now() - startedAt) / 1000)) : 0} s`)),
+                            React.createElement("span", null,
+                                progressPct != null ? Math.round(progressPct) + ' % · ' : '',
+                                React.createElement(Elapsed, { since: startedAt }))),
                         React.createElement("div", { className: "simple-loading-text" }, progress || 'Trabajando…'),
                         React.createElement("div", { className: 'simple-loading-bar' + (progressPct == null ? ' indeterminate' : '') },
                             React.createElement("i", { style: progressPct == null ? undefined : { width: Math.max(2, progressPct) + '%' } })),

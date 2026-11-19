@@ -663,3 +663,8 @@ label.simple-capital em{font-style:normal;font-weight:700;color:var(--text-1)}
 [data-theme="light"] .simple-modal-back{background:rgba(255,255,255,.35)}
 @media(prefers-reduced-motion:reduce){.simple-modal-back{animation:none}}
 .simple-donut-slice[role="button"]{cursor:pointer}
+.simple-trades tbody tr.clickable{cursor:pointer}
+.simple-trades tbody tr.clickable:hover td{background:var(--accent-dim)}
+.simple-trades tbody tr.clickable:focus-visible{outline:2px solid var(--accent);outline-offset:-2px}
+.simple-trades h3 small{font-size:12px;font-weight:500;color:var(--text-3)}
+.simple-modal-trade span.up b{color:var(--green)}.simple-modal-trade span.down b{color:var(--red)}

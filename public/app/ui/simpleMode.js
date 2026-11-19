@@ -100,6 +100,54 @@ window.StockScannerUI = window.StockScannerUI || {};
     </div>;
   }
 
+  // Cronómetro propio: el segundo a segundo no vuelve a pintar toda la página.
+  function Elapsed({ since }){
+    const [, tick] = useState(0);
+    useEffect(() => {
+      if(!since || typeof setInterval !== 'function') return undefined;
+      const id = setInterval(() => tick(t => t + 1), 1000);
+      return () => clearInterval(id);
+    }, [since]);
+    return <>{`${since ? Math.max(0, Math.round((Date.now() - since) / 1000)) : 0} s`}</>;
+  }
+
+  // Lista del escáner (puede tener cientos de filas).
+  const ScanTable = memo(function ScanTable({ rows, columns, selected, inPortfolio, onSelect }){
+    const fmtCol = (v, fmt) => fmt === 'pct' ? pct(v) : fmt === 'num' ? num(v, 1) : (v ?? '—');
+    return <table className="simple-table simple-table-pick">
+      <thead><tr><th>Acción</th><th>Precio</th><th>Semana</th>
+        {columns.map(col => <th key={col.label} title={col.hint}>{col.label}</th>)}
+        <th title="Rentabilidad por unidad de riesgo en el último año">Sharpe 1a</th><th title="Elegida por el optimizador de Markowitz">Cartera</th></tr></thead>
+      <tbody>{rows.map(r => (
+        <tr key={r.ticker} tabIndex={0} aria-selected={r.ticker === selected} className={r.ticker === selected ? 'sel' : ''}
+          onClick={() => onSelect(r.ticker)} onKeyDown={e => { if(e.key === 'Enter' || e.key === ' '){ e.preventDefault(); onSelect(r.ticker); } }}>
+          <td className="tk" title={r.ticker}><b>{r.ticker}</b></td><td>{r.price >= 1000 ? Math.round(r.price).toLocaleString('es-ES') : num(r.price)}</td>
+          <td className={r.chg >= 0 ? 'up' : 'down'}>{pct(r.chg)}</td>
+          {r.values.map((v, k) => <td key={k}>{fmtCol(v, columns[k].fmt)}</td>)}
+          <td>{num(r.sharpe1y)}</td>
+          <td>{inPortfolio.has(r.ticker) && <span className="simple-tag" title="En cartera" aria-label="En cartera">✓</span>}</td>
+        </tr>))}</tbody>
+    </table>;
+  });
+
+  // Operaciones del backtest (pueden ser cientos).
+  const TradesTable = memo(function TradesTable({ trades, cur, onOpen }){
+    return <table className="simple-table">
+      <thead><tr><th>Acción</th><th>Compra</th><th>Precio compra</th><th>Venta</th><th>Precio venta</th><th>Semanas</th><th>Resultado</th><th>Ganancia</th><th>Motivo de la venta</th></tr></thead>
+      <tbody>{trades.map((t, i) => (
+        <tr key={i} tabIndex={0} className="clickable" title="Ver esta operación en el gráfico" onClick={() => onOpen(t)}
+          onKeyDown={e => { if(e.key === 'Enter' || e.key === ' '){ e.preventDefault(); onOpen(t); } }}>
+          <td><b>{t.ticker}</b></td>
+          <td>{dayMonthYear(t.entryTime)}</td><td>{num(t.entryPrice)}</td>
+          <td>{dayMonthYear(t.exitTime)}</td><td>{num(t.exitPrice)}</td>
+          <td>{t.weeks}</td>
+          <td className={t.returnPct >= 0 ? 'up' : 'down'}>{pct(t.returnPct / 100)}</td>
+          <td className={t.pnl >= 0 ? 'up' : 'down'}>{money(t.pnl, cur)}</td>
+          <td className="why" title={t.reason}>{exitReason(t.reason)}</td>
+        </tr>))}</tbody>
+    </table>;
+  });
+
   function Stars({ n, size = 26 }){
     return <span className="simple-stars" aria-label={`${n} de 3 estrellas`} style={{ fontSize: size }}>
       {[0, 1, 2].map(i => <span key={i} aria-hidden="true" className={i < n ? 'on' : 'off'}>★</span>)}
@@ -205,7 +253,7 @@ window.StockScannerUI = window.StockScannerUI || {};
   };
   const MA_COLORS = { WMA: 'var(--amber, #f80)', SMA: 'var(--accent, #09f)', EMA: 'var(--purple, #c6f)' };
   const OSC_COLORS = ['#4cc9f0', '#f472b6', '#a3e635'];
-  const SimpleCandles = memo(function SimpleCandles({ ticker, data, strategy, row, currency }){
+  const SimpleCandles = memo(function SimpleCandles({ ticker, data, strategy, row, currency, focus = null }){
     const host = useRef(null);
     const oscRefs = useRef([]);
     const [ok, setOk] = useState(true);
@@ -219,7 +267,7 @@ window.StockScannerUI = window.StockScannerUI || {};
         const candles = times.map((time, i) => { const k = times.length - 1 - i;
           return { time, open: data.opens?.[k] ?? data.closes[k], high: data.highs[k], low: data.lows[k], close: data.closes[k] }; });
         chart = renderer.buildPriceChart(host.current, data, times, candles, {
-          activeFilters: strategy.entry, activeEntryRules: [], activeExitRules: [], chartTf: '1wk', backtestTrades: [],
+          activeFilters: strategy.entry, activeEntryRules: [], activeExitRules: [], chartTf: '1wk', backtestTrades: focus ? [focus] : [],
           showExitInfo: false, showVolume: true, showIndicators: true, quietLabels: true, setCrossInfo: () => {}, priceHeight: host.current.clientHeight || 300,
         });
         // Un solo panel con todos los osciladores (líneas finas), con el nivel de compra de cada uno y los de venta.
@@ -232,7 +280,12 @@ window.StockScannerUI = window.StockScannerUI || {};
         }
         // Misma anchura de escala en todos los paneles para que las fechas queden alineadas; sólo el último muestra el eje de fechas.
         [chart, ...oscCharts].forEach((ch, i, arr) => ch.applyOptions({ rightPriceScale: { minimumWidth: 78 }, timeScale: { visible: i === arr.length - 1 } }));
-        if(times.length > 104) chart.timeScale().setVisibleLogicalRange({ from: times.length - 104, to: times.length + 2 });
+        if(focus){
+          // Vista centrada en la operación: ~6 meses antes de la compra y ~3 después de la venta.
+          const at = t => { const k = times.findIndex(x => x >= t); return k < 0 ? times.length - 1 : k; };
+          const a = at(focus.entryTime), b = at(focus.exitTime || focus.entryTime);
+          chart.timeScale().setVisibleLogicalRange({ from: Math.max(0, a - 26), to: Math.min(times.length + 2, b + 13) });
+        }else if(times.length > 104) chart.timeScale().setVisibleLogicalRange({ from: times.length - 104, to: times.length + 2 });
         ro = new ResizeObserver(() => {
           if(!host.current) return;
           const w = host.current.clientWidth;
@@ -243,7 +296,7 @@ window.StockScannerUI = window.StockScannerUI || {};
         setOk(true);
       }catch(e){ console.warn('Onix modo simple:', e); setOk(false); }
       return () => { ro?.disconnect(); oscCharts.forEach(oc => renderer.disposeChart(oc)); renderer.disposeChart(chart); };
-    }, [ticker, data, strategy, oscFilters]);
+    }, [ticker, data, strategy, oscFilters, focus]);
     // Medias dibujadas sobre las velas (mismo orden y color que en el gráfico): las de la regla
     // en su color y las de comparación en gris discontinuo.
     const isMa = f => f && ['WMA', 'SMA', 'EMA'].includes(f.ind);
@@ -256,7 +309,7 @@ window.StockScannerUI = window.StockScannerUI || {};
       <figure className="simple-candles">
         <figcaption className="simple-candles-head">
           <div><strong>{ticker}</strong>{row && <span>{`${num(row.price)} ${currencyOf(ticker, currency)}`.trim()}</span>}{row && <em className={row.chg >= 0 ? 'up' : 'down'}>{pct(row.chg)}</em>}</div>
-          <small>Velas semanales · últimos 2 años</small>
+          <small>{focus ? 'Velas semanales · la operación: ▲ compra, ▼ venta' : 'Velas semanales · últimos 2 años'}</small>
         </figcaption>
         <div className="simple-candles-wrap">
           {maLegend.length > 0 && <span className="simple-osc-label simple-ma-label">{maLegend.map(m => <span key={m.label}><i className={m.cmp ? 'cmp' : ''} style={{ background: m.color }}/>{m.label}</span>)}</span>}
@@ -335,7 +388,6 @@ window.StockScannerUI = window.StockScannerUI || {};
     const [progress, setProgress] = useState('');
     const [progressPct, setProgressPct] = useState(null);
     const [startedAt, setStartedAt] = useState(null);
-    const [, setTick] = useState(0);
     const [run, setRun] = useState(null);
     const [error, setError] = useState(null);
     const [games, setGames] = useState(loadGames);
@@ -343,11 +395,28 @@ window.StockScannerUI = window.StockScannerUI || {};
     const [rankMsg, setRankMsg] = useState(null);
     const [compareIds, setCompareIds] = useState([]);
     const [weighting, setWeighting] = useState('markowitz'); // reparto del portafolio y del backtest
-    const [modalTicker, setModalTicker] = useState(null); // acción abierta desde la dona
+    const [modalTicker, setModalTicker] = useState(null); // acción abierta desde la dona o una operación
+    const [modalTrade, setModalTrade] = useState(null);
+    const [modalVer, setModalVer] = useState(0); // fuerza volver a pintar cuando llegan precios
+    const closeModal = () => { setModalTicker(null); setModalTrade(null); };
+    const openStock = t => { setModalTrade(null); setModalTicker(t); };
+    // Abrir una operación: si faltan precios de esas fechas (p. ej. backtest de 8 años) se descargan.
+    const openTrade = async t => {
+      setModalTrade(t); setModalTicker(t.ticker);
+      const have = run?.prices?.[t.ticker] || cacheRef.current[t.ticker]?.['1wk'];
+      const oldest = have?.ok ? have.times[have.times.length - 1] : Infinity;
+      if(!have?.ok || oldest > t.entryTime - 26 * 7 * 86400){
+        try{
+          const old = t.entryTime < Date.now() / 1000 - 4.4 * 365 * 86400; // más de ~4,4 años: hacen falta 10 años de velas
+          await C.loadSimpleWeekly({ tickers: [t.ticker], cacheRef, range: old ? '10y' : null });
+        }catch{}
+        setModalVer(v => v + 1);
+      }
+    };
     const modalClose = useRef(null);
     useEffect(() => {
       if(!modalTicker || typeof document === 'undefined') return undefined;
-      const onKey = e => { if(e.key === 'Escape') setModalTicker(null); };
+      const onKey = e => { if(e.key === 'Escape') closeModal(); };
       document.addEventListener('keydown', onKey);
       setTimeout(() => modalClose.current?.focus?.(), 30);
       return () => document.removeEventListener('keydown', onKey);
@@ -356,12 +425,6 @@ window.StockScannerUI = window.StockScannerUI || {};
     const cacheRef = useRef({});
     const abortRef = useRef(null);
     useEffect(() => () => abortRef.current?.abort(), []);
-    // Cronómetro visible mientras corre el análisis (para ver que sigue trabajando).
-    useEffect(() => {
-      if(!startedAt || typeof setInterval !== 'function') return undefined;
-      const id = setInterval(() => setTick(t => t + 1), 1000);
-      return () => clearInterval(id);
-    }, [startedAt]);
 
     const market = markets.find(m => m.id === marketId);
     const group = groups.find(g => g.id === market?.group) || groups[0];
@@ -537,7 +600,13 @@ window.StockScannerUI = window.StockScannerUI || {};
     const medal = i => ['🥇', '🥈', '🥉'][i] || `${i + 1}.`;
     const cur = run?.market?.currency;
     const scan = run?.scan, pf = run?.portfolio, bt = run?.backtest;
-    const inPortfolio = new Set((pf?.allocations || []).map(a => a.ticker));
+    const inPortfolio = useMemo(() => new Set((pf?.allocations || []).map(a => a.ticker)), [pf]);
+    const scanRows = useMemo(() => (run?.scan?.passing || []).slice(0, 1000), [run?.scan]);
+    // Funciones estables (no cambian entre pintadas) para que las tablas memo no se repinten.
+    const openTradeRef = useRef(null);
+    const onOpenTrade = useMemo(() => t => openTradeRef.current?.(t), []);
+    openTradeRef.current = openTrade;
+    const onSelectRow = useMemo(() => t => setSelTicker(t), []);
     const selected = scan?.passing.some(r => r.ticker === selTicker) ? selTicker : scan?.passing[0]?.ticker;
     const order = useMemo(() => (pf ? brokerOrder(pf.allocations, run?.capital || 10000) : null), [pf, run?.capital]);
     const stockItems = useMemo(() => {
@@ -568,18 +637,26 @@ window.StockScannerUI = window.StockScannerUI || {};
       <div className="simple-mode">
         {modalTicker && run && (() => {
           const it = stockItems.find(x => x.key === modalTicker);
-          const data = run.prices?.[modalTicker] || cacheRef.current[modalTicker]?.['1wk'];
-          return <div className="simple-modal-back" role="presentation" onClick={e => { if(e.target === e.currentTarget) setModalTicker(null); }}>
+          const cached = cacheRef.current[modalTicker]?.['1wk'];
+          const data = (modalTrade && cached?.ok) ? cached : (run.prices?.[modalTicker] || cached);
+          const tr = modalTrade;
+          return <div className="simple-modal-back" role="presentation" onClick={e => { if(e.target === e.currentTarget) closeModal(); }}>
             <div className="simple-modal" role="dialog" aria-modal="true" aria-label={`Gráfico de ${modalTicker}`}>
-              <button type="button" ref={modalClose} className="simple-modal-close" onClick={() => setModalTicker(null)} aria-label="Cerrar">×</button>
-              {it && <div className="simple-modal-facts">
+              <button type="button" ref={modalClose} className="simple-modal-close" onClick={closeModal} aria-label="Cerrar">×</button>
+              {tr ? <div className="simple-modal-facts simple-modal-trade">
+                <span>{`▲ Compra ${dayMonthYear(tr.entryTime)} a ${num(tr.entryPrice)} ${cur}`}</span>
+                <span>{`▼ Venta ${dayMonthYear(tr.exitTime)} a ${num(tr.exitPrice)} ${cur}`}</span>
+                <span className={tr.returnPct >= 0 ? 'up' : 'down'}><b>{pct(tr.returnPct / 100)}</b>{` · ${money(tr.pnl, cur)}`}</span>
+                <span>{`${tr.weeks} semana${tr.weeks === 1 ? '' : 's'} · ${exitReason(tr.reason)}`}</span>
+              </div> : it && <div className="simple-modal-facts">
                 {it.sub && <span>{it.sub}</span>}
                 <span><b>{pct(it.weight, 1, false)}</b> del dinero</span>
                 {run.capital > 0 && <span><b>{money(it.weight * run.capital, cur)}</b></span>}
                 {it.shares != null && <span><b>{it.shares.toLocaleString('es-ES')}</b>{` acci${it.shares === 1 ? 'ón' : 'ones'} a ${num(it.price)} ${cur}`}</span>}
               </div>}
-              {data?.ok ? <SimpleCandles ticker={modalTicker} data={data} strategy={run.strategy} currency={cur} row={run.scan?.passing.find(r => r.ticker === modalTicker)}/>
-                : <p className="simple-note">No hay precios guardados de esta acción.</p>}
+              {data?.ok ? <SimpleCandles key={modalTicker + modalVer} ticker={modalTicker} data={data} strategy={run.strategy} currency={cur} focus={tr}
+                  row={run.scan?.passing.find(r => r.ticker === modalTicker)}/>
+                : <p className="simple-note">Cargando los precios de esta acción…</p>}
             </div>
           </div>;
         })()}
@@ -688,20 +765,8 @@ window.StockScannerUI = window.StockScannerUI || {};
             </div>
             {scan.passing.length ? <div className="simple-scan-grid">
               {/* Todas las acciones, en una lista con su propia barra: no pasa de la altura del gráfico. */}
-              <div className="simple-scan-left"><div className="simple-table-wrap simple-table-scroll" tabIndex={0} aria-label="Acciones que cumplen la estrategia"><table className="simple-table simple-table-pick">
-                <thead><tr><th>Acción</th><th>Precio</th><th>Semana</th>
-                  {run.strategy.columns.map(col => <th key={col.label} title={col.hint}>{col.label}</th>)}
-                  <th title="Rentabilidad por unidad de riesgo en el último año">Sharpe 1a</th><th title="Elegida por el optimizador de Markowitz">Cartera</th></tr></thead>
-                <tbody>{scan.passing.slice(0, 1000).map((r, i) => (
-                  <tr key={r.ticker} tabIndex={0} aria-selected={r.ticker === selected} className={r.ticker === selected ? 'sel' : ''}
-                    onClick={() => setSelTicker(r.ticker)} onKeyDown={e => { if(e.key === 'Enter' || e.key === ' '){ e.preventDefault(); setSelTicker(r.ticker); } }}>
-                    <td className="tk" title={r.ticker}><b>{r.ticker}</b></td><td>{r.price >= 1000 ? Math.round(r.price).toLocaleString('es-ES') : num(r.price)}</td>
-                    <td className={r.chg >= 0 ? 'up' : 'down'}>{pct(r.chg)}</td>
-                    {r.values.map((v, k) => <td key={k}>{fmtCol(v, run.strategy.columns[k].fmt)}</td>)}
-                    <td>{num(r.sharpe1y)}</td>
-                    <td>{inPortfolio.has(r.ticker) && <span className="simple-tag" title="En cartera" aria-label="En cartera">✓</span>}</td>
-                  </tr>))}</tbody>
-              </table></div>
+              <div className="simple-scan-left"><div className="simple-table-wrap simple-table-scroll" tabIndex={0} aria-label="Acciones que cumplen la estrategia">
+                <ScanTable rows={scanRows} columns={run.strategy.columns} selected={selected} inPortfolio={inPortfolio} onSelect={onSelectRow}/>              </div>
               <p className="simple-note">{`${scan.passing.length} acciones · haz clic en una fila para ver su gráfico${scan.passing.length > 10 ? ' (usa la rueda del ratón para ver más)' : ''}. Las ${Math.min(scan.passing.length, C.SIMPLE_CANDIDATES)} con mejor Sharpe del último año pasan al optimizador.`}</p></div>
               {selected && <SimpleCandles ticker={selected} data={run.prices ? run.prices[selected] : cacheRef.current[selected]?.['1wk']} strategy={run.strategy} currency={cur}
                 row={scan.passing.find(r => r.ticker === selected)}/>}
@@ -744,7 +809,7 @@ window.StockScannerUI = window.StockScannerUI || {};
                   </div>
                 </div>
                 {weightView === 'stock'
-                  ? <Donut key="stock" title="Peso por acción" currency={cur} capital={run.capital || 0} center={stockCenter} items={stockItems} onPick={setModalTicker}/>
+                  ? <Donut key="stock" title="Peso por acción" currency={cur} capital={run.capital || 0} center={stockCenter} items={stockItems} onPick={openStock}/>
                   : <Donut key="sector" title="Peso por sector" currency={cur} capital={run.capital || 0} center={sectorCenter} items={sectorItems}/>}
               </div>
             </div>
@@ -805,21 +870,9 @@ window.StockScannerUI = window.StockScannerUI || {};
               <div><span>Comisiones pagadas</span><strong>{money(bt.commissions, cur)}</strong></div>
             </div>
             {bt.trades?.length > 0 && <div className="simple-trades">
-              <h3>{`📋 Operaciones realizadas · ${bt.trades.length}`}</h3>
+              <h3>{`📋 Operaciones realizadas · ${bt.trades.length}`}<small> · pulsa una para verla en el gráfico</small></h3>
               <div className="simple-table-wrap simple-trades-scroll" tabIndex={0} aria-label="Operaciones del backtest">
-                <table className="simple-table">
-                  <thead><tr><th>Acción</th><th>Compra</th><th>Precio compra</th><th>Venta</th><th>Precio venta</th><th>Semanas</th><th>Resultado</th><th>Ganancia</th><th>Motivo de la venta</th></tr></thead>
-                  <tbody>{bt.trades.map((t, i) => (
-                    <tr key={i}>
-                      <td><b>{t.ticker}</b></td>
-                      <td>{dayMonthYear(t.entryTime)}</td><td>{num(t.entryPrice)}</td>
-                      <td>{dayMonthYear(t.exitTime)}</td><td>{num(t.exitPrice)}</td>
-                      <td>{t.weeks}</td>
-                      <td className={t.returnPct >= 0 ? 'up' : 'down'}>{pct(t.returnPct / 100)}</td>
-                      <td className={t.pnl >= 0 ? 'up' : 'down'}>{money(t.pnl, cur)}</td>
-                      <td className="why" title={t.reason}>{exitReason(t.reason)}</td>
-                    </tr>))}</tbody>
-                </table>
+                <TradesTable trades={bt.trades} cur={cur} onOpen={onOpenTrade}/>
               </div>
             </div>}
             <div className="simple-stars-help"><span>⭐ ganar dinero</span><span>⭐ ganar al mercado</span><span>⭐ caer menos que el mercado</span></div>
@@ -829,7 +882,7 @@ window.StockScannerUI = window.StockScannerUI || {};
             <div className="simple-loading-body">
               <div className="simple-loading-top">
                 <b>{`Paso ${{ scan: 3, portfolio: 4, backtest: 5 }[stage]} de 5 · ${(STAGES.find(x => x.id === stage) || {}).label || ''}`}</b>
-                <span>{`${progressPct != null ? Math.round(progressPct) + ' % · ' : ''}${startedAt ? Math.max(0, Math.round((Date.now() - startedAt) / 1000)) : 0} s`}</span>
+                <span>{progressPct != null ? Math.round(progressPct) + ' % · ' : ''}<Elapsed since={startedAt}/></span>
               </div>
               <div className="simple-loading-text">{progress || 'Trabajando…'}</div>
               <div className={'simple-loading-bar' + (progressPct == null ? ' indeterminate' : '')}><i style={progressPct == null ? undefined : { width: Math.max(2, progressPct) + '%' }}/></div>

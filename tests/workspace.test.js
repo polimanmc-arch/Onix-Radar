@@ -421,7 +421,7 @@ test('simple mode: first visit opens the 3-step simulator, plays a game and can 
   const btn=label=>tree.root.findAll(n=>n.type==='button'&&text(n).includes(label)&&!String(n.props['aria-label']||'').startsWith('Paso '))[0];
   // Zonas de mercado con sus opciones y la estrategia base preseleccionada con su detalle.
   for(const g of ['Acciones de EE. UU.','Europa','ETF y otros activos','Universo completo']) assert.ok(json().includes(g),g);
-  for(const o of ['S&P 500','Dow Jones 30','Nasdaq 100','Russell 2000 (top 25)','Todas las americanas']) assert.ok(btn(o),o);
+  for(const o of ['S&P 500','Dow Jones 30','Nasdaq 100','Russell 2000','Todas las americanas']) assert.ok(btn(o),o);
   assert.equal(tree.root.findByProps({'aria-label':'Ver el detalle de Estrategia base Radar Onix'}).type,'button');
   assert.ok(json().includes('Stoch %K(1) < 20')&&json().includes('WMA 30'),'base strategy rules and indicators are readable');
   assert.equal(tree.root.findAllByProps({className:'simple-rule'}).length,0,'dense rules live in the tooltip, not on the card');

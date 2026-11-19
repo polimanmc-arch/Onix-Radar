@@ -161,3 +161,19 @@ test('equal weighting: same money per stock in the portfolio and in the backtest
   assert.equal(c.buildSimpleBacktestOptions({market,strategy,period:{weeks:52},weighting:'equal'}).btAllocationMode,'equal');
   assert.equal(c.buildSimpleBacktestOptions({market,strategy,period:{weeks:52}}).btAllocationMode,'maxsharpe');
 });
+
+test('Russell 2000: the whole index list is downloaded once and used by the scanner and the backtest',async()=>{
+  const ctx=vm.createContext({window:{},console});
+  vm.runInContext(fs.readFileSync(path.join(root,'public/app/core/simpleSimulator.js'),'utf8'),ctx);
+  const c=ctx.window.StockScannerCore;
+  const market=c.SIMPLE_MARKETS.find(m=>m.id==='RUSSELL2000');
+  assert.ok(market&&market.dynamic==='russell2000'&&!market.heavy,'full Russell 2000 option');
+  assert.equal(c.SIMPLE_MARKETS.some(m=>m.name==='Russell 2000 (top 25)'),false);
+  let calls=0; const tickers=Array.from({length:2000},(_,i)=>'R'+i);
+  const fetchImpl=async url=>{ calls++; assert.equal(url,'/api/tickers/russell2000'); return {json:async()=>({tickers})}; };
+  assert.equal((await c.resolveSimpleUniverse(market,fetchImpl)).length,2000);
+  await c.resolveSimpleUniverse(market,fetchImpl); assert.equal(calls,1);
+  const o=c.buildSimpleBacktestOptions({market,strategy:c.SIMPLE_STRATEGIES[1],period:{weeks:52}});
+  assert.equal(o.btUniverseSource,'custom'); assert.equal(o.btCustomTickers.split(', ').length,2000);
+  await assert.rejects(c.resolveSimpleUniverse({...market,id:'R2'},async()=>({json:async()=>({tickers:['A']})})),/Russell 2000/);
+});

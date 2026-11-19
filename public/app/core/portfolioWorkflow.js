@@ -131,6 +131,7 @@
       results, filters, shortFilters,
       pfCapital, pfMinWeight, pfMaxWeight, pfMaxPos, pfRiskFree, pfCorFilter, pfCorThresh,
       pfMode, pfSims, pfSeed, pfStopType, pfStopATRMult, pfStopATRPeriod, pfStopPctVal,
+      pfSkipSparklines = false,
       sectorData, scanDirection, pfUniverseSource, pfManualTickers,
       fetchSectors, dataCacheRef, setPfBuilding, setTab, setPortfolio,
     } = opts;
@@ -437,6 +438,8 @@
         (async ()=>{
           const sparkEntries = await Promise.all(allocTickers.map(async t => {
             try {
+              // El modo simple no muestra estas mini series: evita descargar años de velas diarias.
+              if(pfSkipSparklines) return [t, []];
               const cached = dataCacheRef.current?.[t]?.['1d'];
               let d = cached;
               if(!(d && d.ok && Array.isArray(d.closes) && d.closes.length >= 10)){
