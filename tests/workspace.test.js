@@ -419,7 +419,15 @@ test('simple mode: first visit opens the 3-step simulator, plays a game and can 
   assert.ok(json().includes('Simulador de estrategias'));
   const text=n=>n.children.map(ch=>typeof ch==='string'?ch:text(ch)).join('');
   const btn=label=>tree.root.find(n=>n.type==='button'&&text(n).includes(label));
-  assert.equal(btn('Elige una estrategia').props.disabled,true);
+  // Zonas de mercado con sus opciones y la estrategia base preseleccionada con su detalle.
+  for(const g of ['Acciones de EE. UU.','Europa','ETF y otros activos','Universo completo']) assert.ok(json().includes(g),g);
+  for(const o of ['S&P 500','Dow Jones 30','Nasdaq 100','Russell 2000 (top 25)','Todas las americanas']) assert.ok(btn(o),o);
+  assert.equal(tree.root.findByProps({'aria-label':'Ver el detalle de Estrategia base Radar Onix'}).type,'button');
+  assert.ok(json().includes('Estocástico %K(1) < 20')&&json().includes('WMA 30'),'base strategy rules and indicators are readable');
+  await Renderer.act(async()=>btn('Europa').props.onClick());
+  assert.ok(btn('IBEX 35')&&btn('Toda Europa'));
+  await Renderer.act(async()=>btn('Acciones de EE. UU.').props.onClick());
+  await Renderer.act(async()=>btn('Dow Jones 30').props.onClick());
   await Renderer.act(async()=>btn('Seguir la tendencia').props.onClick());
   await Renderer.act(async()=>btn('1 año').props.onClick());
   await Renderer.act(async()=>{ await btn('Ejecutar análisis').props.onClick(); });
@@ -429,7 +437,8 @@ test('simple mode: first visit opens the 3-step simulator, plays a game and can 
   assert.equal(tree.root.findAllByProps({'aria-label':'Frontera eficiente de Markowitz con el portafolio elegido'}).length,1,'efficient frontier');
   assert.equal(tree.root.findAllByProps({'aria-label':'Resultado del backtest'}).length,1,'backtest section');
   assert.ok(json().includes('Peso por acción')&&json().includes('Peso por sector'));
-  assert.ok(json().includes('Comprar el Dow Jones 30 y esperar')&&json().includes('Ratio de Sharpe'));
+  assert.ok(json().includes('Comprar el Dow Jones (DIA) y esperar')&&json().includes('Ratio de Sharpe'));
+  assert.ok(json().includes('Precio > SMA(40)'),'the scanner shows the applied rules');
   assert.ok(tree.root.findAllByProps({className:'simple-stars'}).length>=1);
   assert.equal(tree.root.findAll(n=>n.type==='li'&&n.props['data-state']==='done').length,3,'all stages done');
   assert.equal(tree.root.findAllByProps({'aria-label':'Tus partidas'}).length,1);

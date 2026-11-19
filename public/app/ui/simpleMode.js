@@ -27,7 +27,7 @@ window.StockScannerUI = window.StockScannerUI || {};
   }
 
   // Estrategia frente al índice.
-  function SimpleChart({ summary, currency, marketName }){
+  function SimpleChart({ summary, currency, holdLabel }){
     const W = 640, H = 230, padL = 58, padR = 14, padT = 12, padB = 26;
     const a = summary.curve, b = summary.bench;
     const all = [summary.capital, ...a.map(p => p.value), ...b.map(p => p.value)];
@@ -37,10 +37,10 @@ window.StockScannerUI = window.StockScannerUI || {};
     const y = v => padT + (1 - (v - lo) / rg) * (H - padT - padB);
     const path = pts => pts.map((p, i) => (i ? 'L' : 'M') + x(p.time).toFixed(1) + ',' + y(p.value).toFixed(1)).join(' ');
     const area = path(a) + ` L${x(t1).toFixed(1)},${(H - padB).toFixed(1)} L${x(t0).toFixed(1)},${(H - padB).toFixed(1)} Z`;
-    const ticks = [lo + rg * 0.1, summary.capital, hi - rg * 0.1].filter((v, i, arr) => arr.indexOf(v) === i);
+    const ticks = [summary.capital, ...[lo + rg * 0.1, hi - rg * 0.1].filter(v => Math.abs(v - summary.capital) > rg * 0.12)];
     return (
       <figure className="simple-chart">
-        <svg viewBox={`0 0 ${W} ${H}`} role="img" aria-label={`Evolución de 10.000 ${currency}: estrategia frente al ${marketName}`}>
+        <svg viewBox={`0 0 ${W} ${H}`} role="img" aria-label={`Evolución de 10.000 ${currency}: estrategia frente a comprar ${holdLabel}`}>
           {ticks.map(v => <g key={v}>
             <line x1={padL} x2={W - padR} y1={y(v)} y2={y(v)} stroke="var(--border)" strokeDasharray={v === summary.capital ? '4 4' : '0'} strokeWidth="1"/>
             <text x={padL - 8} y={y(v) + 4} textAnchor="end" fontSize="11" fill="var(--text-2)">{Math.round(v).toLocaleString('es-ES')}</text>
@@ -53,7 +53,7 @@ window.StockScannerUI = window.StockScannerUI || {};
         </svg>
         <figcaption className="simple-legend">
           <span><i style={{ background: 'var(--accent)' }}/>Estrategia</span>
-          <span><i className="dashed"/>{`Comprar el ${marketName} y esperar`}</span>
+          <span><i className="dashed"/>{`Comprar ${holdLabel} y esperar`}</span>
         </figcaption>
       </figure>
     );
@@ -111,9 +111,10 @@ window.StockScannerUI = window.StockScannerUI || {};
 
   function SimpleMode(){
     const C = core();
-    const markets = C.SIMPLE_MARKETS, strategies = C.SIMPLE_STRATEGIES, periods = C.SIMPLE_PERIODS;
+    const markets = C.SIMPLE_MARKETS, groups = C.SIMPLE_MARKET_GROUPS, strategies = C.SIMPLE_STRATEGIES, periods = C.SIMPLE_PERIODS;
     const [marketId, setMarketId] = useState('DOW30');
-    const [strategyId, setStrategyId] = useState(null);
+    const [strategyId, setStrategyId] = useState('base');
+    const [tipOpen, setTipOpen] = useState(null);
     const [years, setYears] = useState(3);
     const [stage, setStage] = useState('idle');
     const [progress, setProgress] = useState('');
@@ -126,6 +127,8 @@ window.StockScannerUI = window.StockScannerUI || {};
     useEffect(() => () => abortRef.current?.abort(), []);
 
     const market = markets.find(m => m.id === marketId);
+    const group = groups.find(g => g.id === market?.group) || groups[0];
+    const countOf = m => C.simpleUniverseTickers(m).length;
     const strategy = strategies.find(s => s.id === strategyId);
     const period = periods.find(p => p.years === years) || periods[periods.length - 1];
     const running = stage !== 'idle' && stage !== 'done';
@@ -140,7 +143,7 @@ window.StockScannerUI = window.StockScannerUI || {};
       try{
         // 1. Escáner
         setStage('scan'); setProgress('Descargando precios semanales');
-        const tickers = window.StockScannerConfig.UNIVERSE_PRESETS[market.preset]?.tickers || [];
+        const tickers = C.simpleUniverseTickers(market);
         await C.loadSimpleWeekly({ tickers, cacheRef, signal: ac.signal, onProgress: (d, t) => setProgress(`Descargando precios ${d} de ${t}`) });
         const scan = C.scanSimpleMarket({ tickers, dataByTicker: cacheRef.current, strategy });
         setRun(r => ({ ...r, scan: { ...scan, total: tickers.length } }));
@@ -167,7 +170,7 @@ window.StockScannerUI = window.StockScannerUI || {};
         const backtest = summary ? { summary, annReturn: raw.annReturn, sharpe: raw.sharpe, commissions: raw.totalCommissionPaid } : null;
         setRun(r => ({ ...r, backtest, backtestError: backtest ? null : (out?.message || 'No hubo datos suficientes para el backtest.') }));
         if(summary){
-          const game = { id: Date.now(), market: market.name, flag: market.flag, strategy: strategy.name, icon: strategy.icon, period: period.label, ret: summary.ret, benchRet: summary.benchRet, stars: summary.stars };
+          const game = { id: Date.now(), market: market.name, flag: market.icon, strategy: strategy.name, icon: strategy.icon, period: period.label, ret: summary.ret, benchRet: summary.benchRet, stars: summary.stars };
           setGames(prev => { const next = [game, ...prev].slice(0, 30); saveGames(next); return next; });
         }
         setStage('done');
@@ -200,24 +203,48 @@ window.StockScannerUI = window.StockScannerUI || {};
         <div className="simple-setup">
           <section className="simple-step" aria-labelledby="simple-step-market">
             <h2 id="simple-step-market"><span className="simple-step-n">A</span>Mercado</h2>
-            <div className="simple-grid simple-grid-markets">
-              {markets.map(m => (
-                <button type="button" key={m.id} className="simple-card compact" aria-pressed={m.id === marketId} onClick={() => setMarketId(m.id)} disabled={running}>
-                  <span className="simple-card-icon">{m.flag}</span><strong>{m.name}</strong><span>{m.blurb}</span>
+            <div className="simple-grid simple-grid-groups">
+              {groups.map(g => (
+                <button type="button" key={g.id} className="simple-card compact" aria-pressed={g.id === group.id} disabled={running}
+                  onClick={() => { if(g.id !== group.id) setMarketId(g.options[0].id); }}>
+                  <span className="simple-card-icon">{g.icon}</span><strong>{g.name}</strong><span>{g.blurb}</span>
                 </button>
               ))}
             </div>
+            <div className="simple-options" role="group" aria-label={`Universo de ${group.name}`}>
+              {group.options.map(o => (
+                <button type="button" key={o.id} aria-pressed={o.id === marketId} disabled={running} onClick={() => setMarketId(o.id)}
+                  title={o.heavy ? 'Más de 1.000 activos: la primera carga puede tardar 1-2 minutos' : undefined}>
+                  {o.name}<small>{countOf(o)}</small>
+                </button>
+              ))}
+            </div>
+            <p className="simple-note">{`Universo: ${countOf(market)} activos · comparado con comprar ${market.holdLabel}${market.heavy ? ' · la primera carga puede tardar 1-2 minutos' : ''}${market.note ? ' · ' + market.note : ''}`}</p>
           </section>
           <section className="simple-step" aria-labelledby="simple-step-strategy">
             <h2 id="simple-step-strategy"><span className="simple-step-n">B</span>Estrategia</h2>
             <div className="simple-grid simple-grid-3">
               {strategies.map(st => (
-                <button type="button" key={st.id} className="simple-card simple-card-strategy" aria-pressed={st.id === strategyId} onClick={() => setStrategyId(st.id)} disabled={running}>
-                  <span className="simple-card-icon">{st.icon}</span><strong>{st.name}</strong><span>{st.pitch}</span>
-                  <span className="simple-rule"><b>Compra:</b> {st.buy}</span>
-                  <span className="simple-rule"><b>Vende:</b> {st.sell}</span>
-                  <em className="simple-badge">{st.level}</em>
-                </button>
+                <div key={st.id} className="simple-card-wrap">
+                  <button type="button" className="simple-card simple-card-strategy" aria-pressed={st.id === strategyId} onClick={() => setStrategyId(st.id)} disabled={running}>
+                    <span className="simple-card-icon">{st.icon}</span><strong>{st.name}</strong><span>{st.pitch}</span>
+                    <span className="simple-ind-list" aria-label="Indicadores">{st.indicators.map(i => <i key={i.name}>{i.name}</i>)}<i className="tf">Velas semanales</i></span>
+                    <span className="simple-rule"><b>Compra:</b> {st.buy}</span>
+                    <span className="simple-rule"><b>Vende:</b> {st.sell}</span>
+                    <em className="simple-badge">{st.isBase ? '★ Base · ' + st.level : st.level}</em>
+                  </button>
+                  <div className={'simple-tip' + (tipOpen === st.id ? ' open' : '')} onMouseLeave={() => setTipOpen(t => t === st.id ? null : t)}>
+                    <button type="button" className="simple-tip-btn" aria-label={`Ver el detalle de ${st.name}`} aria-expanded={tipOpen === st.id}
+                      onClick={() => setTipOpen(t => t === st.id ? null : st.id)}>i</button>
+                    <div className="simple-tip-pop" role="tooltip">
+                      <strong>{`${st.icon} ${st.name}`}</strong>
+                      <div className="simple-tip-sec"><b>Compra cuando se cumplen todas:</b><ul>{st.rulesBuy.map(r => <li key={r}>{r}</li>)}</ul></div>
+                      <div className="simple-tip-sec"><b>Vende cuando:</b><ul>{st.rulesSell.map(r => <li key={r}>{r}</li>)}</ul></div>
+                      <div className="simple-tip-sec"><b>Indicadores (velas semanales):</b><ul>{st.indicators.map(i => <li key={i.name}><b>{i.name}:</b> {i.what}</li>)}</ul></div>
+                      <div className="simple-tip-sec"><b>Cómo se evalúa:</b><ul>{C.SIMPLE_PROCESS_METRICS.map(m => <li key={m}>{m}</li>)}</ul></div>
+                    </div>
+                  </div>
+                </div>
               ))}
             </div>
           </section>
@@ -247,6 +274,7 @@ window.StockScannerUI = window.StockScannerUI || {};
             <header><span className="simple-panel-n">1</span><div>
               <h2>Escáner · ¿qué acciones cumplen hoy la estrategia?</h2>
               <p>Se revisan todas las acciones del mercado con la última vela semanal cerrada y se quedan las que cumplen las reglas de compra.</p>
+              <p className="simple-applied"><b>{`${run.strategy.icon} ${run.strategy.name}:`}</b> {run.strategy.rulesBuy.join(' · ')}</p>
             </div></header>
             <div className="simple-kpis">
               <div><span>Acciones analizadas</span><strong>{scan.analyzed}</strong></div>
@@ -285,7 +313,13 @@ window.StockScannerUI = window.StockScannerUI || {};
               <FrontierChart portfolio={pf}/>
               <div>
                 <h3>Peso por acción</h3>
-                <Bars items={pf.allocations.map(a => ({ key: a.ticker, label: a.ticker, sub: a.shortName && a.shortName !== a.ticker ? a.shortName : sectorEs(a.sector), weight: Math.abs(a.weight), extra: money(Math.abs(a.weight) * 10000, cur) }))}/>
+                <Bars items={(() => {
+                  const items = pf.allocations.map(a => ({ key: a.ticker, label: a.ticker, sub: a.shortName && a.shortName !== a.ticker ? a.shortName : sectorEs(a.sector), weight: Math.abs(a.weight), extra: money(Math.abs(a.weight) * 10000, cur) }));
+                  const cash = 1 - items.reduce((t, i) => t + i.weight, 0);
+                  // Con pocas acciones, el límite de 25 % por acción deja parte en efectivo.
+                  if(cash > 0.01) items.push({ key: 'cash', label: 'Efectivo', sub: 'por el límite de 25 % por acción', weight: cash, extra: money(cash * 10000, cur) });
+                  return items;
+                })()}/>
                 <h3>Peso por sector</h3>
                 <Bars color="var(--green)" items={(pf.sectors || []).map(s => ({ key: s.name, label: sectorEs(s.name), sub: `${s.count} acción${s.count > 1 ? 'es' : ''}`, weight: s.weight }))}/>
               </div>
@@ -305,9 +339,9 @@ window.StockScannerUI = window.StockScannerUI || {};
             <div className="simple-scores">
               <div className="simple-score main"><span>Estrategia</span><strong>{money(bt.summary.final, cur)}</strong><em className={bt.summary.ret >= 0 ? 'up' : 'down'}>{pct(bt.summary.ret)}</em></div>
               <div className="simple-vs">VS</div>
-              <div className="simple-score"><span>{`Comprar el ${run.market.name} y esperar`}</span><strong>{money(bt.summary.benchFinal, cur)}</strong><em className={(bt.summary.benchRet || 0) >= 0 ? 'up' : 'down'}>{pct(bt.summary.benchRet)}</em></div>
+              <div className="simple-score"><span>{`Comprar ${run.market.holdLabel} y esperar`}</span><strong>{money(bt.summary.benchFinal, cur)}</strong><em className={(bt.summary.benchRet || 0) >= 0 ? 'up' : 'down'}>{pct(bt.summary.benchRet)}</em></div>
             </div>
-            <SimpleChart summary={bt.summary} currency={cur} marketName={run.market.name}/>
+            <SimpleChart summary={bt.summary} currency={cur} holdLabel={run.market.holdLabel}/>
             <div className="simple-facts simple-facts-6">
               <div><span>Rentabilidad anual</span><strong>{pct(bt.annReturn)}</strong></div>
               <div><span>Ratio de Sharpe</span><strong>{num(bt.sharpe)}</strong></div>

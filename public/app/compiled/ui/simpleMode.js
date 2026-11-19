@@ -31,7 +31,7 @@ window.StockScannerUI = window.StockScannerUI || {};
         return React.createElement("span", { className: "simple-stars", "aria-label": `${n} de 3 estrellas`, style: { fontSize: size } }, [0, 1, 2].map(i => React.createElement("span", { key: i, "aria-hidden": "true", className: i < n ? 'on' : 'off' }, "\u2605")));
     }
     // Estrategia frente al índice.
-    function SimpleChart({ summary, currency, marketName }) {
+    function SimpleChart({ summary, currency, holdLabel }) {
         const W = 640, H = 230, padL = 58, padR = 14, padT = 12, padB = 26;
         const a = summary.curve, b = summary.bench;
         const all = [summary.capital, ...a.map(p => p.value), ...b.map(p => p.value)];
@@ -41,9 +41,9 @@ window.StockScannerUI = window.StockScannerUI || {};
         const y = v => padT + (1 - (v - lo) / rg) * (H - padT - padB);
         const path = pts => pts.map((p, i) => (i ? 'L' : 'M') + x(p.time).toFixed(1) + ',' + y(p.value).toFixed(1)).join(' ');
         const area = path(a) + ` L${x(t1).toFixed(1)},${(H - padB).toFixed(1)} L${x(t0).toFixed(1)},${(H - padB).toFixed(1)} Z`;
-        const ticks = [lo + rg * 0.1, summary.capital, hi - rg * 0.1].filter((v, i, arr) => arr.indexOf(v) === i);
+        const ticks = [summary.capital, ...[lo + rg * 0.1, hi - rg * 0.1].filter(v => Math.abs(v - summary.capital) > rg * 0.12)];
         return (React.createElement("figure", { className: "simple-chart" },
-            React.createElement("svg", { viewBox: `0 0 ${W} ${H}`, role: "img", "aria-label": `Evolución de 10.000 ${currency}: estrategia frente al ${marketName}` },
+            React.createElement("svg", { viewBox: `0 0 ${W} ${H}`, role: "img", "aria-label": `Evolución de 10.000 ${currency}: estrategia frente a comprar ${holdLabel}` },
                 ticks.map(v => React.createElement("g", { key: v },
                     React.createElement("line", { x1: padL, x2: W - padR, y1: y(v), y2: y(v), stroke: "var(--border)", strokeDasharray: v === summary.capital ? '4 4' : '0', strokeWidth: "1" }),
                     React.createElement("text", { x: padL - 8, y: y(v) + 4, textAnchor: "end", fontSize: "11", fill: "var(--text-2)" }, Math.round(v).toLocaleString('es-ES')))),
@@ -58,7 +58,7 @@ window.StockScannerUI = window.StockScannerUI || {};
                     "Estrategia"),
                 React.createElement("span", null,
                     React.createElement("i", { className: "dashed" }),
-                    `Comprar el ${marketName} y esperar`))));
+                    `Comprar ${holdLabel} y esperar`))));
     }
     // Frontera eficiente: miles de combinaciones de pesos (riesgo, rentabilidad) y el portafolio elegido.
     function FrontierChart({ portfolio }) {
@@ -119,9 +119,10 @@ window.StockScannerUI = window.StockScannerUI || {};
     function SimpleMode() {
         var _a;
         const C = core();
-        const markets = C.SIMPLE_MARKETS, strategies = C.SIMPLE_STRATEGIES, periods = C.SIMPLE_PERIODS;
+        const markets = C.SIMPLE_MARKETS, groups = C.SIMPLE_MARKET_GROUPS, strategies = C.SIMPLE_STRATEGIES, periods = C.SIMPLE_PERIODS;
         const [marketId, setMarketId] = useState('DOW30');
-        const [strategyId, setStrategyId] = useState(null);
+        const [strategyId, setStrategyId] = useState('base');
+        const [tipOpen, setTipOpen] = useState(null);
         const [years, setYears] = useState(3);
         const [stage, setStage] = useState('idle');
         const [progress, setProgress] = useState('');
@@ -133,12 +134,13 @@ window.StockScannerUI = window.StockScannerUI || {};
         const sectionRef = useRef(null);
         useEffect(() => () => { var _a; return (_a = abortRef.current) === null || _a === void 0 ? void 0 : _a.abort(); }, []);
         const market = markets.find(m => m.id === marketId);
+        const group = groups.find(g => g.id === (market === null || market === void 0 ? void 0 : market.group)) || groups[0];
+        const countOf = m => C.simpleUniverseTickers(m).length;
         const strategy = strategies.find(s => s.id === strategyId);
         const period = periods.find(p => p.years === years) || periods[periods.length - 1];
         const running = stage !== 'idle' && stage !== 'done';
         const ready = market && strategy && !running;
         const execute = async () => {
-            var _a;
             if (!ready)
                 return;
             const ac = new AbortController();
@@ -151,7 +153,7 @@ window.StockScannerUI = window.StockScannerUI || {};
                 // 1. Escáner
                 setStage('scan');
                 setProgress('Descargando precios semanales');
-                const tickers = ((_a = window.StockScannerConfig.UNIVERSE_PRESETS[market.preset]) === null || _a === void 0 ? void 0 : _a.tickers) || [];
+                const tickers = C.simpleUniverseTickers(market);
                 await C.loadSimpleWeekly({ tickers, cacheRef, signal: ac.signal, onProgress: (d, t) => setProgress(`Descargando precios ${d} de ${t}`) });
                 const scan = C.scanSimpleMarket({ tickers, dataByTicker: cacheRef.current, strategy });
                 setRun(r => ({ ...r, scan: { ...scan, total: tickers.length } }));
@@ -187,7 +189,7 @@ window.StockScannerUI = window.StockScannerUI || {};
                 const backtest = summary ? { summary, annReturn: raw.annReturn, sharpe: raw.sharpe, commissions: raw.totalCommissionPaid } : null;
                 setRun(r => ({ ...r, backtest, backtestError: backtest ? null : ((out === null || out === void 0 ? void 0 : out.message) || 'No hubo datos suficientes para el backtest.') }));
                 if (summary) {
-                    const game = { id: Date.now(), market: market.name, flag: market.flag, strategy: strategy.name, icon: strategy.icon, period: period.label, ret: summary.ret, benchRet: summary.benchRet, stars: summary.stars };
+                    const game = { id: Date.now(), market: market.name, flag: market.icon, strategy: strategy.name, icon: strategy.icon, period: period.label, ret: summary.ret, benchRet: summary.benchRet, stars: summary.stars };
                     setGames(prev => { const next = [game, ...prev].slice(0, 30); saveGames(next); return next; });
                 }
                 setStage('done');
@@ -224,27 +226,57 @@ window.StockScannerUI = window.StockScannerUI || {};
                     React.createElement("h2", { id: "simple-step-market" },
                         React.createElement("span", { className: "simple-step-n" }, "A"),
                         "Mercado"),
-                    React.createElement("div", { className: "simple-grid simple-grid-markets" }, markets.map(m => (React.createElement("button", { type: "button", key: m.id, className: "simple-card compact", "aria-pressed": m.id === marketId, onClick: () => setMarketId(m.id), disabled: running },
-                        React.createElement("span", { className: "simple-card-icon" }, m.flag),
-                        React.createElement("strong", null, m.name),
-                        React.createElement("span", null, m.blurb)))))),
+                    React.createElement("div", { className: "simple-grid simple-grid-groups" }, groups.map(g => (React.createElement("button", { type: "button", key: g.id, className: "simple-card compact", "aria-pressed": g.id === group.id, disabled: running, onClick: () => { if (g.id !== group.id)
+                            setMarketId(g.options[0].id); } },
+                        React.createElement("span", { className: "simple-card-icon" }, g.icon),
+                        React.createElement("strong", null, g.name),
+                        React.createElement("span", null, g.blurb))))),
+                    React.createElement("div", { className: "simple-options", role: "group", "aria-label": `Universo de ${group.name}` }, group.options.map(o => (React.createElement("button", { type: "button", key: o.id, "aria-pressed": o.id === marketId, disabled: running, onClick: () => setMarketId(o.id), title: o.heavy ? 'Más de 1.000 activos: la primera carga puede tardar 1-2 minutos' : undefined },
+                        o.name,
+                        React.createElement("small", null, countOf(o)))))),
+                    React.createElement("p", { className: "simple-note" }, `Universo: ${countOf(market)} activos · comparado con comprar ${market.holdLabel}${market.heavy ? ' · la primera carga puede tardar 1-2 minutos' : ''}${market.note ? ' · ' + market.note : ''}`)),
                 React.createElement("section", { className: "simple-step", "aria-labelledby": "simple-step-strategy" },
                     React.createElement("h2", { id: "simple-step-strategy" },
                         React.createElement("span", { className: "simple-step-n" }, "B"),
                         "Estrategia"),
-                    React.createElement("div", { className: "simple-grid simple-grid-3" }, strategies.map(st => (React.createElement("button", { type: "button", key: st.id, className: "simple-card simple-card-strategy", "aria-pressed": st.id === strategyId, onClick: () => setStrategyId(st.id), disabled: running },
-                        React.createElement("span", { className: "simple-card-icon" }, st.icon),
-                        React.createElement("strong", null, st.name),
-                        React.createElement("span", null, st.pitch),
-                        React.createElement("span", { className: "simple-rule" },
-                            React.createElement("b", null, "Compra:"),
-                            " ",
-                            st.buy),
-                        React.createElement("span", { className: "simple-rule" },
-                            React.createElement("b", null, "Vende:"),
-                            " ",
-                            st.sell),
-                        React.createElement("em", { className: "simple-badge" }, st.level)))))),
+                    React.createElement("div", { className: "simple-grid simple-grid-3" }, strategies.map(st => (React.createElement("div", { key: st.id, className: "simple-card-wrap" },
+                        React.createElement("button", { type: "button", className: "simple-card simple-card-strategy", "aria-pressed": st.id === strategyId, onClick: () => setStrategyId(st.id), disabled: running },
+                            React.createElement("span", { className: "simple-card-icon" }, st.icon),
+                            React.createElement("strong", null, st.name),
+                            React.createElement("span", null, st.pitch),
+                            React.createElement("span", { className: "simple-ind-list", "aria-label": "Indicadores" },
+                                st.indicators.map(i => React.createElement("i", { key: i.name }, i.name)),
+                                React.createElement("i", { className: "tf" }, "Velas semanales")),
+                            React.createElement("span", { className: "simple-rule" },
+                                React.createElement("b", null, "Compra:"),
+                                " ",
+                                st.buy),
+                            React.createElement("span", { className: "simple-rule" },
+                                React.createElement("b", null, "Vende:"),
+                                " ",
+                                st.sell),
+                            React.createElement("em", { className: "simple-badge" }, st.isBase ? '★ Base · ' + st.level : st.level)),
+                        React.createElement("div", { className: 'simple-tip' + (tipOpen === st.id ? ' open' : ''), onMouseLeave: () => setTipOpen(t => t === st.id ? null : t) },
+                            React.createElement("button", { type: "button", className: "simple-tip-btn", "aria-label": `Ver el detalle de ${st.name}`, "aria-expanded": tipOpen === st.id, onClick: () => setTipOpen(t => t === st.id ? null : st.id) }, "i"),
+                            React.createElement("div", { className: "simple-tip-pop", role: "tooltip" },
+                                React.createElement("strong", null, `${st.icon} ${st.name}`),
+                                React.createElement("div", { className: "simple-tip-sec" },
+                                    React.createElement("b", null, "Compra cuando se cumplen todas:"),
+                                    React.createElement("ul", null, st.rulesBuy.map(r => React.createElement("li", { key: r }, r)))),
+                                React.createElement("div", { className: "simple-tip-sec" },
+                                    React.createElement("b", null, "Vende cuando:"),
+                                    React.createElement("ul", null, st.rulesSell.map(r => React.createElement("li", { key: r }, r)))),
+                                React.createElement("div", { className: "simple-tip-sec" },
+                                    React.createElement("b", null, "Indicadores (velas semanales):"),
+                                    React.createElement("ul", null, st.indicators.map(i => React.createElement("li", { key: i.name },
+                                        React.createElement("b", null,
+                                            i.name,
+                                            ":"),
+                                        " ",
+                                        i.what)))),
+                                React.createElement("div", { className: "simple-tip-sec" },
+                                    React.createElement("b", null, "C\u00F3mo se eval\u00FAa:"),
+                                    React.createElement("ul", null, C.SIMPLE_PROCESS_METRICS.map(m => React.createElement("li", { key: m }, m))))))))))),
                 React.createElement("div", { className: "simple-launch" },
                     React.createElement("div", { className: "simple-periods", role: "group", "aria-label": "Periodo del backtest" },
                         React.createElement("span", null, "Backtest:"),
@@ -266,7 +298,11 @@ window.StockScannerUI = window.StockScannerUI || {};
                         React.createElement("span", { className: "simple-panel-n" }, "1"),
                         React.createElement("div", null,
                             React.createElement("h2", null, "Esc\u00E1ner \u00B7 \u00BFqu\u00E9 acciones cumplen hoy la estrategia?"),
-                            React.createElement("p", null, "Se revisan todas las acciones del mercado con la \u00FAltima vela semanal cerrada y se quedan las que cumplen las reglas de compra."))),
+                            React.createElement("p", null, "Se revisan todas las acciones del mercado con la \u00FAltima vela semanal cerrada y se quedan las que cumplen las reglas de compra."),
+                            React.createElement("p", { className: "simple-applied" },
+                                React.createElement("b", null, `${run.strategy.icon} ${run.strategy.name}:`),
+                                " ",
+                                run.strategy.rulesBuy.join(' · ')))),
                     React.createElement("div", { className: "simple-kpis" },
                         React.createElement("div", null,
                             React.createElement("span", null, "Acciones analizadas"),
@@ -332,7 +368,14 @@ window.StockScannerUI = window.StockScannerUI || {};
                         React.createElement(FrontierChart, { portfolio: pf }),
                         React.createElement("div", null,
                             React.createElement("h3", null, "Peso por acci\u00F3n"),
-                            React.createElement(Bars, { items: pf.allocations.map(a => ({ key: a.ticker, label: a.ticker, sub: a.shortName && a.shortName !== a.ticker ? a.shortName : sectorEs(a.sector), weight: Math.abs(a.weight), extra: money(Math.abs(a.weight) * 10000, cur) })) }),
+                            React.createElement(Bars, { items: (() => {
+                                    const items = pf.allocations.map(a => ({ key: a.ticker, label: a.ticker, sub: a.shortName && a.shortName !== a.ticker ? a.shortName : sectorEs(a.sector), weight: Math.abs(a.weight), extra: money(Math.abs(a.weight) * 10000, cur) }));
+                                    const cash = 1 - items.reduce((t, i) => t + i.weight, 0);
+                                    // Con pocas acciones, el límite de 25 % por acción deja parte en efectivo.
+                                    if (cash > 0.01)
+                                        items.push({ key: 'cash', label: 'Efectivo', sub: 'por el límite de 25 % por acción', weight: cash, extra: money(cash * 10000, cur) });
+                                    return items;
+                                })() }),
                             React.createElement("h3", null, "Peso por sector"),
                             React.createElement(Bars, { color: "var(--green)", items: (pf.sectors || []).map(s => ({ key: s.name, label: sectorEs(s.name), sub: `${s.count} acción${s.count > 1 ? 'es' : ''}`, weight: s.weight })) })))),
                 run.backtestError && React.createElement("section", { className: "simple-panel", "aria-label": "Backtest" },
@@ -357,10 +400,10 @@ window.StockScannerUI = window.StockScannerUI || {};
                             React.createElement("em", { className: bt.summary.ret >= 0 ? 'up' : 'down' }, pct(bt.summary.ret))),
                         React.createElement("div", { className: "simple-vs" }, "VS"),
                         React.createElement("div", { className: "simple-score" },
-                            React.createElement("span", null, `Comprar el ${run.market.name} y esperar`),
+                            React.createElement("span", null, `Comprar ${run.market.holdLabel} y esperar`),
                             React.createElement("strong", null, money(bt.summary.benchFinal, cur)),
                             React.createElement("em", { className: (bt.summary.benchRet || 0) >= 0 ? 'up' : 'down' }, pct(bt.summary.benchRet)))),
-                    React.createElement(SimpleChart, { summary: bt.summary, currency: cur, marketName: run.market.name }),
+                    React.createElement(SimpleChart, { summary: bt.summary, currency: cur, holdLabel: run.market.holdLabel }),
                     React.createElement("div", { className: "simple-facts simple-facts-6" },
                         React.createElement("div", null,
                             React.createElement("span", null, "Rentabilidad anual"),

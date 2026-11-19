@@ -44,3 +44,24 @@ test('today signals use the cached weekly data of the chosen market only',()=>{
   assert.deepEqual(JSON.parse(JSON.stringify(out.list.map(x=>x.ticker))),['UP'],'other markets and the benchmark are ignored');
   assert.equal(out.total,1);
 });
+
+
+test('market groups: every option resolves to a universe; yields are excluded and big or filtered universes are explicit',()=>{
+  const ctx=vm.createContext({window:{},console});
+  for(const f of ['config/sp500History.js','config/universes.js','core/simpleSimulator.js'])
+    vm.runInContext(fs.readFileSync(path.join(root,'public/app',f),'utf8'),ctx);
+  const c=ctx.window.StockScannerCore;
+  assert.deepEqual(JSON.parse(JSON.stringify(c.SIMPLE_MARKET_GROUPS.map(g=>g.id))),['us','eu','assets','global']);
+  for(const m of c.SIMPLE_MARKETS){ assert.ok(c.simpleUniverseTickers(m).length>=8,m.id); assert.ok(m.benchmark&&m.holdLabel,m.id); }
+  const bonds=c.SIMPLE_MARKETS.find(m=>m.id==='BONDS_TREASURIES');
+  assert.ok(!c.simpleUniverseTickers(bonds).some(t=>['^TNX','^TYX','^FVX','^IRX'].includes(t)));
+  const base=c.SIMPLE_STRATEGIES[0];
+  assert.equal(base.id,'base'); assert.ok(base.isBase);
+  assert.deepEqual(JSON.parse(JSON.stringify(base.entry.map(x=>x.ind))),['WMA','RSI','STOCH']);
+  const period={weeks:52};
+  const global=c.buildSimpleBacktestOptions({market:c.SIMPLE_MARKETS.find(m=>m.id==='GLOBAL_FULL_UNIVERSE'),strategy:base,period});
+  assert.equal(global.btUniverseSource,'custom','the expert preset would add every US stock');
+  assert.equal(global.btCustomTickers.split(', ').length,c.simpleUniverseTickers(c.SIMPLE_MARKETS.find(m=>m.id==='GLOBAL_FULL_UNIVERSE')).length);
+  assert.equal(global.btLightMemory,false);
+  assert.equal(c.buildSimpleBacktestOptions({market:c.SIMPLE_MARKETS.find(m=>m.id==='SP500'),strategy:base,period}).btUniverseSource,'SP500');
+});

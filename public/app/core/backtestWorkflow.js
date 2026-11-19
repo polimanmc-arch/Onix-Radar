@@ -7,7 +7,7 @@
       stopATR, stopATRMult, stopPct, stopPctVal,
       btWeeks, btEndOffset, btCapital, pfMaxPos, pfRiskFree, btBenchmark, btCommission, btSlippage,
       pfStopATRPeriod, pfMinWeight, pfMaxWeight, pfMode, btAllocationMode,
-      btUniverseSource, btCustomTickers, btUniverseLimit,
+      btUniverseSource, btCustomTickers, btUniverseLimit, btLightMemory,
       savedUniverseLists,
       mktFilterEnabled, mktFilterTicker, mktFilterTf,
       mktFilterInd, mktFilterPeriod, mktFilterOp, mktFilterVal, mktFilterRules,
@@ -360,7 +360,9 @@
           setBacktest({status:'config_error',message,equityCurve:[],weeklyLog:[],allTrades:[],diagnostics:{loadStats:{requested:rawTickers.length,unique:rawTickers.length,loaded:0,failed:0,insufficient:0},tickerIssues:[],validTickers:0},perf:{totalMs:Math.round(((typeof performance !== 'undefined' && performance.now) ? performance.now() : Date.now())-perfStart),tickers:0}});
           return { ok:false, message };
         }
-        backtestLocalOnlyCache = rawTickers.length > 900;
+        // Modo memoria ligera para universos enormes; btLightMemory:false lo desactiva (p. ej. el modo simple,
+        // que reutiliza los precios entre ejecuciones y no debe ver su caché vaciada).
+        backtestLocalOnlyCache = btLightMemory === false ? false : rawTickers.length > 900;
         report('Cargando datos del universo',0,rawTickers.length,{loaded:0,failed:0,insufficient:0,current:backtestLocalOnlyCache?'modo memoria ligera':'',sourceTotal,limit,trimmedSeriesCount,trimmedBarsSaved});
         await loadUniverseData(rawTickers,ruleTfs,rawTickers.length>3000?300:rawTickers.length>900?240:120);
       } else {
@@ -370,7 +372,7 @@
         const limit=Math.max(0,Math.round(Number(btUniverseLimit)||0));
         if(limit>0&&cacheTickers.length>limit) cacheTickers=cacheTickers.slice(0,limit);
         report('Leyendo datos del ultimo scan',0,cacheTickers.length,{loaded:0,failed:0,insufficient:0,trimmedSeriesCount,trimmedBarsSaved});
-        backtestLocalOnlyCache = cacheTickers.length > 900;
+        backtestLocalOnlyCache = btLightMemory === false ? false : cacheTickers.length > 900;
         await loadUniverseData(cacheTickers,ruleTfs,cacheTickers.length>3000?300:cacheTickers.length>900?240:160);
       }
       markPerf('dataMs');
