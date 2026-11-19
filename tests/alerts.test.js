@@ -149,3 +149,35 @@ test('alert runner validates the file, resolves universes and only sends when th
   assert.equal(out[2].dataProblem,true,'most symbols without data triggers a warning message');
   assert.equal(logs.length,3);
 });
+
+test('alerts with fundamental filters receive quote data like the scanner',async()=>{
+  const {runAlerts}=require(path.join(root,'scripts/run-alerts.js'));
+  const ctx=vm.createContext({window:{},console,setTimeout,clearTimeout,AbortController,Date,Math});
+  for(const f of ['config/timeframes.js','config/indicators.js','config/sp500History.js','config/universes.js','core/indicators.js','core/engine.js','core/ruleEvaluator.js','core/scannerWorkflow.js','core/alerts.js'])
+    vm.runInContext(fs.readFileSync(path.join(root,'public/app',f),'utf8'),ctx);
+  const w=ctx.window;
+  const lastDay=utc(2026,11,17,14,30);
+  const s=dailySeries(lastDay,[90,90,90,110]);
+  w.StockScannerCore.fetchTicker=async()=>s;
+  let asked=null;
+  const getQuotes=async(tickers,opts)=>{ asked={tickers,opts}; return {CHEAP:{peRatio:9},PRICEY:{peRatio:45}}; };
+  const out=await runAlerts({alerts:[{id:'pe',name:'PE',tickers:['CHEAP','PRICEY'],filters:[priceAbove(100),{ind:'PE',tf:'1d',op:'<',cmpType:'val',cmpVal:15,params:{}}]}],
+    core:w.StockScannerCore,cfg:w.StockScannerConfig,now:utc(2026,11,17,21,30),log:()=>{},getQuotes});
+  assert.deepEqual(plain(asked),{tickers:['CHEAP','PRICEY'],opts:{details:true}});
+  assert.deepEqual(plain(out[0].res.fresh.map(r=>r.ticker)),['CHEAP']);
+});
+
+test('health reports Node and the yahoo-finance2 status; ONIX_YF2=0 keeps the built-in client',async()=>{
+  const {spawnSync}=require('node:child_process');
+  const script=`const s=require(${JSON.stringify(path.join(root,'server/services/yahooFinance2'))});console.log(JSON.stringify(s.status()));`;
+  const off=JSON.parse(spawnSync(process.execPath,['-e',script],{env:{...process.env,ONIX_YF2:'0'},encoding:'utf8'}).stdout);
+  assert.equal(off.available,false); assert.match(off.reason,/ONIX_YF2=0/);
+  const on=JSON.parse(spawnSync(process.execPath,['-e',script],{encoding:'utf8'}).stdout);
+  assert.equal(on.available,Number(process.versions.node.split('.')[0])>=22);
+  const {createApp}=require(path.join(root,'server/app'));
+  const srv=createApp().listen(0,'127.0.0.1'); await new Promise(r=>srv.once('listening',r));
+  try{
+    const h=await fetch(`http://127.0.0.1:${srv.address().port}/api/health`).then(r=>r.json());
+    assert.equal(h.ok,true); assert.equal(h.node,process.versions.node); assert.equal(typeof h.yahooFinance2.available,'boolean');
+  } finally { srv.close(); }
+});

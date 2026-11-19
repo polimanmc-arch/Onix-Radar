@@ -14,7 +14,7 @@ const vm = require('node:vm');
 const ROOT = path.join(__dirname, '..');
 const CORE_FILES = [
   'config/timeframes.js', 'config/indicators.js', 'config/sp500History.js', 'config/universes.js',
-  'core/indicators.js', 'core/engine.js', 'core/ruleEvaluator.js', 'core/alerts.js',
+  'core/indicators.js', 'core/engine.js', 'core/ruleEvaluator.js', 'core/scannerWorkflow.js', 'core/alerts.js',
 ];
 
 function parseArgs(argv){
@@ -85,13 +85,22 @@ async function fetchUniverse(core, tickers, tfs, concurrency){
   return data;
 }
 
-async function runAlerts({ alerts, core, cfg, now = Date.now() / 1000, windowHours = 26, concurrency = 12, log = console.log }){
+async function runAlerts({ alerts, core, cfg, now = Date.now() / 1000, windowHours = 26, concurrency = 12, log = console.log, getQuotes = null }){
   const outputs = [];
   for(const alert of alerts){
     const { tickers, label } = resolveUniverse(alert, cfg);
     const tfs = [...new Set(alert.filters.map(f => f.tf))];
     const t0 = Date.now();
     const data = await fetchUniverse(core, tickers, tfs, concurrency);
+    // Filtros fundamentales (P/E, ROE, sector...): se adjuntan los datos de cotización como en el scanner.
+    if(getQuotes && typeof core.scanNeedsMeta === 'function' && core.scanNeedsMeta(alert.filters)){
+      const quotes = await getQuotes(tickers, { details: true }).catch(() => ({}));
+      for(const t of tickers){
+        if(!data[t] || !quotes?.[t]) continue;
+        const { marketMeta, fundamentalMeta } = core.splitMeta(quotes[t]);
+        data[t]._meta = { ...marketMeta, ...fundamentalMeta };
+      }
+    }
     const res = core.evaluateAlert({ alert, dataByTicker: data, now, windowSeconds: windowHours * 3600 });
     if(!res.ok) throw new Error(`${alert.id}: ${res.message}`);
     const date = new Date(now * 1000).toISOString().slice(0, 10);
@@ -120,7 +129,8 @@ async function main(){
   await new Promise(resolve => server.once('listening', resolve));
   try{
     const w = loadCore(`http://127.0.0.1:${server.address().port}`);
-    const outputs = await runAlerts({ alerts, core: w.StockScannerCore, cfg: w.StockScannerConfig, windowHours: args.windowHours, concurrency: args.concurrency });
+    const { getQuotes } = require(path.join(ROOT, 'server', 'services', 'marketData.service'));
+    const outputs = await runAlerts({ alerts, core: w.StockScannerCore, cfg: w.StockScannerConfig, windowHours: args.windowHours, concurrency: args.concurrency, getQuotes });
     for(const out of outputs){
       if(out.dataProblem) out.messages[out.messages.length - 1] += '\n\n⚠️ Más de la mitad de los símbolos no devolvió datos: revisa la fuente.';
       if(args.dryRun || !configured){ console.log(out.messages.join('\n---\n')); continue; }

@@ -39,7 +39,9 @@ Mejora añadida: alertas por Telegram (`public/app/core/alerts.js`, `scripts/run
 
 Backtest con historial parcial: los valores con al menos 30 velas semanales participan desde que tienen datos (salidas a bolsa o altas recientes) en lugar de descartarse por no cubrir todo el periodo. El calendario semanal sale de la serie válida más larga. Datos y diagnóstico indica cuántos valores tienen historial parcial.
 
-Indicadores verificados contra implementaciones de referencia independientes (`tests/indicatorReference.test.js`). La instalación de `trading-signals` como dependencia de desarrollo quedó pendiente de autorización.
+Indicadores verificados contra implementaciones de referencia independientes (`tests/indicatorReference.test.js`). Además, `tests/tradingSignals.test.js` compara los indicadores con la librería trading-signals.
+
+Cotizaciones y fundamentales: las llamadas propias a `/v7/finance/quote` y `/v10/finance/quoteSummary` devolvían vacío porque Yahoo exige cookie y *crumb*; los filtros fundamentales del scanner y el enriquecimiento del portafolio no recibían datos. Ahora se usa yahoo-finance2 (Node 22+) con el cliente propio como respaldo. Las alertas de Telegram adjuntan también los fundamentales cuando la alerta los usa.
 
 Mejora añadida: portafolio con modo HRP (Hierarchical Risk Parity de López de Prado: distancia de correlación, enlace simple, orden cuasi-diagonal y bisección recursiva por varianza; no invierte la covarianza) y tarjeta X-ray en Resumen con avisos de posición dominante (>25 %), tres mayores (>50 %), sector (>40 %), diversificación efectiva (<5 posiciones equivalentes), pares con correlación >0,8 y efectivo sin invertir.
 

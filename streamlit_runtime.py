@@ -5,7 +5,10 @@ import atexit
 from concurrent.futures import ThreadPoolExecutor
 import json
 import hashlib
+import io
 import os
+import platform
+import tarfile
 from pathlib import Path
 import re
 import shutil
@@ -38,6 +41,70 @@ def frontend_version() -> str:
     return digest.hexdigest()
 
 
+MIN_NODE_MAJOR = 22  # yahoo-finance2 (cotizaciones y fundamentales) requiere Node 22+
+NODE_DIST = 'https://nodejs.org/dist/latest-v22.x/'
+
+
+def node_major(node: str | None) -> int:
+    if not node:
+        return 0
+    try:
+        out = subprocess.run([node, '-v'], capture_output=True, text=True, timeout=15).stdout.strip()
+        return int(out.lstrip('v').split('.')[0])
+    except (OSError, ValueError, subprocess.SubprocessError):
+        return 0
+
+
+def node_platform() -> str | None:
+    """Sufijo de los binarios oficiales de Node para este sistema (sólo Linux, como Community Cloud)."""
+    if platform.system().lower() != 'linux':
+        return None
+    arch = {'x86_64': 'x64', 'amd64': 'x64', 'aarch64': 'arm64', 'arm64': 'arm64'}.get(platform.machine().lower())
+    return f'linux-{arch}' if arch else None
+
+
+def provision_node(dest: Path | None = None, suffix: str | None = None, opener=urlopen, verify: bool = True) -> Path | None:
+    """Descarga el último Node 22 oficial de nodejs.org y comprueba su SHA-256 con SHASUMS256.txt."""
+    suffix = suffix or node_platform()
+    if not suffix:
+        return None
+    dest = dest or ROOT / '.cache' / 'node22'
+    for existing in sorted(dest.glob(f'node-v*-{suffix}/bin/node')):
+        if not verify or node_major(str(existing)) >= MIN_NODE_MAJOR:
+            return existing
+    with opener(NODE_DIST + 'SHASUMS256.txt', timeout=30) as response:
+        sums = response.read().decode('utf-8')
+    entry = next((line.split() for line in sums.splitlines() if line.endswith(f'-{suffix}.tar.xz')), None)
+    if not entry or len(entry) != 2:
+        raise RuntimeError(f'No hay binario de Node para {suffix}.')
+    expected, name = entry
+    with opener(NODE_DIST + name, timeout=300) as response:
+        data = response.read()
+    if hashlib.sha256(data).hexdigest() != expected:
+        raise RuntimeError('La suma SHA-256 del binario de Node no coincide: no se usa.')
+    dest.mkdir(parents=True, exist_ok=True)
+    with tarfile.open(fileobj=io.BytesIO(data), mode='r:xz') as archive:
+        archive.extractall(dest, filter='data')
+    node = dest / name[:-len('.tar.xz')] / 'bin' / 'node'
+    if verify and node_major(str(node)) < MIN_NODE_MAJOR:
+        return None
+    return node
+
+
+def choose_node() -> str | None:
+    """Node del sistema si es 22+; si no, intenta el oficial descargado. Ante cualquier fallo, el del sistema."""
+    system = shutil.which('node')
+    if node_major(system) >= MIN_NODE_MAJOR or os.environ.get('ONIX_PROVISION_NODE', '1') == '0':
+        return system
+    try:
+        provisioned = provision_node()
+        if provisioned:
+            return str(provisioned)
+    except Exception as error:  # la app sigue con el Node del sistema y el cliente de Yahoo propio
+        print(f'[Radar Onix] Node {MIN_NODE_MAJOR} no disponible: {error}', flush=True)
+    return system
+
+
 def prepare_frontend() -> Path:
     """Keep a generated copy: the local Node app and source assets stay intact."""
     destination = ROOT / '.cache' / 'streamlit_frontend'
@@ -58,13 +125,21 @@ def prepare_frontend() -> Path:
 
 class NodeRuntime:
     def __init__(self):
-        node = shutil.which('node')
+        node = choose_node()
         npm = shutil.which('npm.cmd' if os.name == 'nt' else 'npm')
         if not node or not npm:
             raise RuntimeError('Node.js y npm son necesarios. En Community Cloud se instalan mediante packages.txt.')
-        if not (ROOT / 'node_modules' / 'express' / 'package.json').exists():
+        # Reinstalar si falta express o si cambió package-lock.json (p. ej. nuevas dependencias tras un push).
+        lock_hash = hashlib.sha256((ROOT / 'package-lock.json').read_bytes()).hexdigest()
+        marker = ROOT / 'node_modules' / '.onix-lock-sha256'
+        installed = (ROOT / 'node_modules' / 'express' / 'package.json').exists()
+        # En desarrollo (dependencias de desarrollo instaladas) no se toca node_modules: lo gestiona npm.
+        development = (ROOT / 'node_modules' / 'typescript' / 'package.json').exists()
+        stale = not marker.exists() or marker.read_text(encoding='utf-8').strip() != lock_hash
+        if not installed or (stale and not development):
             subprocess.run([npm, 'ci', '--omit=dev', '--ignore-scripts', '--no-audit', '--no-fund'],
-                           cwd=ROOT, check=True, timeout=240)
+                           cwd=ROOT, check=True, timeout=300)
+            marker.write_text(lock_hash, encoding='utf-8')
         with socket.socket() as sock:
             sock.bind(('127.0.0.1', 0))
             self.port = sock.getsockname()[1]

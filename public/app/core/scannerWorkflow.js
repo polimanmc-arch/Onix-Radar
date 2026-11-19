@@ -182,5 +182,5 @@
     }
   }
 
-  window.StockScannerCore = Object.assign(window.StockScannerCore||{}, { runScanWorkflow });
+  window.StockScannerCore = Object.assign(window.StockScannerCore||{}, { runScanWorkflow, scanNeedsMeta, splitMeta });
 })();

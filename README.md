@@ -58,6 +58,8 @@ WMA · SMA · EMA · RSI · Estocástico %K · MACD Histograma · ATR · Precio 
 
 Yahoo Finance · Nasdaq Screener · Composición histórica del S&P 500: [fja05680/sp500](https://github.com/fja05680/sp500) (MIT). Para actualizarla: `node scripts/build-sp500-history.js`.
 
+Cotizaciones, fundamentales, sector e industria se obtienen con [yahoo-finance2](https://github.com/gadicc/yahoo-finance2) (MIT), que gestiona la cookie y el *crumb* que Yahoo exige. Requiere **Node 22+**: en Streamlit Cloud, si el Node del sistema es anterior, el arranque descarga el Node 22 oficial de nodejs.org y verifica su SHA-256 (`ONIX_PROVISION_NODE=0` lo desactiva). Sin Node 22, o con `ONIX_YF2=0`, se usa el cliente propio, cuyos precios siguen funcionando. `/api/health` indica la versión de Node y si yahoo-finance2 está activo.
+
 ## Alertas por Telegram
 
 Dos formas de recibir señales del scanner en Telegram:

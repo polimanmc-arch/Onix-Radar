@@ -18,6 +18,10 @@
     "react": "18.3.1",
     "react-dom": "18.3.1",
     "react-test-renderer": "18.3.1",
+    "trading-signals": "8.4.0",
     "typescript": "6.0.3"
+  },
+  "optionalDependencies": {
+    "yahoo-finance2": "4.0.6"
   }
 }

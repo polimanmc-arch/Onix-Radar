@@ -2,6 +2,7 @@ const { getCache, setCache } = require('../utils/cache');
 const { getDiskCache, setDiskCache, pruneDiskCache } = require('../utils/diskCache');
 const { fetchJson, fetchText } = require('../utils/http');
 const SECTOR_MAP = require('../data/sectorMap');
+const yf2 = require('./yahooFinance2');
 
 const CHART_MEMORY_TTL_MS = Number(process.env.ONIX_CHART_MEMORY_TTL_MS) || 15 * 60_000;
 const CHART_DISK_TTL_MS = Number(process.env.ONIX_CHART_DISK_TTL_MS) || 12 * 60 * 60 * 1000;
@@ -38,10 +39,14 @@ async function getQuoteDetails(symbol) {
     `https://query2.finance.yahoo.com/v10/finance/quoteSummary/${encodeURIComponent(symbol)}?modules=price,summaryDetail,defaultKeyStatistics,financialData,assetProfile`,
   ];
 
-  for (const url of urls) {
+  // yahoo-finance2 primero (gestiona el crumb); después, las URLs directas.
+  const sources = [
+    async () => yf2.quoteSummary(symbol, ['price', 'summaryDetail', 'defaultKeyStatistics', 'financialData', 'assetProfile']),
+    ...urls.map(url => async () => (await fetchJson(url, { timeoutMs: 9000 }))?.quoteSummary?.result?.[0]),
+  ];
+  for (const source of sources) {
     try {
-      const data = await fetchJson(url, { timeoutMs: 9000 });
-      const r = data?.quoteSummary?.result?.[0];
+      const r = await source();
       if (!r) continue;
       const price = r.price || {};
       const sd = r.summaryDetail || {};
@@ -199,6 +204,19 @@ async function getSectorForSymbol(symbol) {
     return null;
   };
 
+  const viaLibrary = await yf2.quoteSummary(symbol, ['assetProfile', 'summaryProfile', 'quoteType', 'price']);
+  if (viaLibrary) {
+    const qt = (viaLibrary.quoteType?.quoteType || '').toUpperCase();
+    const result = classify({
+      sector: viaLibrary.assetProfile?.sector || viaLibrary.summaryProfile?.sector || (qt === 'ETF' ? 'ETF' : qt === 'MUTUALFUND' ? 'Mutual Fund' : ''),
+      industry: viaLibrary.assetProfile?.industry || viaLibrary.summaryProfile?.industry || '',
+    });
+    if (result) {
+      setCache(cacheKey, result, 6 * 60 * 60 * 1000);
+      return result;
+    }
+  }
+
   const quoteUrls = [
     `https://query1.finance.yahoo.com/v7/finance/quote?symbols=${encodeURIComponent(symbol)}`,
     `https://query2.finance.yahoo.com/v7/finance/quote?symbols=${encodeURIComponent(symbol)}`
@@ -289,8 +307,9 @@ async function getQuotes(symbols, options = {}) {
       `https://query2.finance.yahoo.com/v7/finance/quote?symbols=${encodeURIComponent(chunk.join(','))}`,
     ];
 
-    let fetched = null;
-    for (const url of urls) {
+    let fetched = await yf2.quote(chunk);
+    if (fetched && !fetched.length) fetched = null;
+    if (!fetched) for (const url of urls) {
       try {
         const data = await fetchJson(url, { timeoutMs: 10000 });
         const arr = data?.quoteResponse?.result;
