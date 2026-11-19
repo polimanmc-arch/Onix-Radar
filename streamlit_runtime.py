@@ -9,8 +9,10 @@ import io
 import os
 import platform
 import tarfile
+import sys
 import tempfile
 import threading
+import types
 from pathlib import Path
 import re
 import shutil
@@ -128,9 +130,9 @@ def server_version() -> str:
     return digest.hexdigest()
 
 
-_runtime_lock = threading.Lock()
-_runtime: 'NodeRuntime | None' = None
-_runtime_key: str | None = None
+# Estado del servidor de Node guardado fuera de este módulo: Streamlit recarga el módulo cuando
+# cambia tras un push y las variables globales se perderían, dejando huérfano el servidor anterior.
+_STATE = sys.modules.setdefault('_onix_radar_runtime_state', types.SimpleNamespace(lock=threading.Lock(), runtime=None, key=None))
 
 
 def get_runtime() -> 'NodeRuntime':
@@ -139,42 +141,75 @@ def get_runtime() -> 'NodeRuntime':
     Antes se guardaba en st.cache_resource con la versión del frontend como clave: cada despliegue
     creaba un servidor nuevo sin cerrar los anteriores y la app acababa sin memoria.
     """
-    global _runtime, _runtime_key
     key = server_version()
-    with _runtime_lock:
-        alive = _runtime is not None and _runtime.process.poll() is None
-        if alive and _runtime_key == key:
-            return _runtime
-        if _runtime is not None:
-            _runtime.close()
-        _runtime, _runtime_key = None, None
-        _runtime = NodeRuntime()
-        _runtime_key = key
-        return _runtime
+    with _STATE.lock:
+        current = _STATE.runtime
+        if current is not None and current.process.poll() is None and _STATE.key == key:
+            return current
+        if current is not None:
+            current.close()
+        _STATE.runtime, _STATE.key = None, None
+        _STATE.runtime = NodeRuntime()
+        _STATE.key = key
+        return _STATE.runtime
 
 
 def prepare_frontend() -> Path:
-    """Keep a generated copy: the local Node app and source assets stay intact."""
-    destination = ROOT / '.cache' / 'streamlit_frontend'
-    shutil.copytree(ROOT / 'public', destination, dirs_exist_ok=True)
-    index = destination / 'index.html'
-    html = index.read_text(encoding='utf-8')
-    html = html.replace('src="/', 'src="./').replace('href="/', 'href="./')
+    """Copia generada del frontend en una carpeta por versión, construida aparte y publicada de golpe.
+
+    Reescribir los archivos en el mismo sitio mientras el navegador los pedía provocaba en
+    Streamlit "Expected ASGI message 'http.response.start'" (el tamaño cambiaba a mitad de envío).
+    """
     version = frontend_version()[:12]
-    # Cache-busting for every local script and stylesheet so browsers never mix releases.
-    html = re.sub(r'(src|href)="\./([^"?]+\.(?:js|css))"', lambda m: f'{m.group(1)}="./{m.group(2)}?v={version}"', html)
-    index.write_text(html, encoding='utf-8')
-    for file in (destination / 'app').rglob('*.js'):
-        source = file.read_text(encoding='utf-8')
-        source = source.replace('"/assets/', '"./assets/').replace("'/assets/", "'./assets/")
-        file.write_text(source, encoding='utf-8')
+    base = ROOT / '.cache' / 'streamlit_frontend'
+    destination = base / version
+    if (destination / '.ready').exists():
+        return destination
+    base.mkdir(parents=True, exist_ok=True)
+    staging = Path(tempfile.mkdtemp(prefix=f'.build-{version}-', dir=base))
+    try:
+        shutil.copytree(ROOT / 'public', staging, dirs_exist_ok=True)
+        index = staging / 'index.html'
+        html = index.read_text(encoding='utf-8')
+        html = html.replace('src="/', 'src="./').replace('href="/', 'href="./')
+        # Cache-busting for every local script and stylesheet so browsers never mix releases.
+        html = re.sub(r'(src|href)="\./([^"?]+\.(?:js|css))"', lambda m: f'{m.group(1)}="./{m.group(2)}?v={version}"', html)
+        index.write_text(html, encoding='utf-8')
+        for file in (staging / 'app').rglob('*.js'):
+            source = file.read_text(encoding='utf-8')
+            source = source.replace('"/assets/', '"./assets/').replace("'/assets/", "'./assets/")
+            file.write_text(source, encoding='utf-8')
+        (staging / '.ready').write_text(version, encoding='utf-8')
+        try:
+            os.replace(staging, destination)
+        except OSError:  # otra sesión la publicó a la vez
+            if not (destination / '.ready').exists():
+                raise
+    finally:
+        if staging.exists():
+            shutil.rmtree(staging, ignore_errors=True)
+    # Versiones antiguas: se conservan las dos más recientes por si alguna sesión aún las usa.
+    old = sorted((d for d in base.iterdir() if d.is_dir() and d != destination and not d.name.startswith('.')),
+                 key=lambda d: d.stat().st_mtime, reverse=True)
+    for stale in old[1:]:
+        shutil.rmtree(stale, ignore_errors=True)
     return destination
+
+
+def npm_command(node: str | None) -> list[str] | None:
+    """npm que acompaña al Node elegido: el del sistema descartaría yahoo-finance2 (pide Node 22+)."""
+    if node:
+        bundled = Path(node).resolve().parent.parent / 'lib' / 'node_modules' / 'npm' / 'bin' / 'npm-cli.js'
+        if bundled.is_file():
+            return [node, str(bundled)]
+    system = shutil.which('npm.cmd' if os.name == 'nt' else 'npm')
+    return [system] if system else None
 
 
 class NodeRuntime:
     def __init__(self):
         node = choose_node()
-        npm = shutil.which('npm.cmd' if os.name == 'nt' else 'npm')
+        npm = npm_command(node)
         if not node or not npm:
             raise RuntimeError('Node.js y npm son necesarios. En Community Cloud se instalan mediante packages.txt.')
         # Reinstalar si falta express o si cambió package-lock.json (p. ej. nuevas dependencias tras un push).
@@ -183,11 +218,15 @@ class NodeRuntime:
         installed = (ROOT / 'node_modules' / 'express' / 'package.json').exists()
         # En desarrollo (dependencias de desarrollo instaladas) no se toca node_modules: lo gestiona npm.
         development = (ROOT / 'node_modules' / 'typescript' / 'package.json').exists()
-        stale = not marker.exists() or marker.read_text(encoding='utf-8').strip() != lock_hash
+        major = node_major(node)
+        expected = f'{lock_hash}:node{major}'
+        missing_yf2 = major >= MIN_NODE_MAJOR and not (ROOT / 'node_modules' / 'yahoo-finance2' / 'package.json').exists()
+        stale = missing_yf2 or not marker.exists() or marker.read_text(encoding='utf-8').strip() != expected
         if not installed or (stale and not development):
-            subprocess.run([npm, 'ci', '--omit=dev', '--ignore-scripts', '--no-audit', '--no-fund'],
-                           cwd=ROOT, check=True, timeout=300)
-            marker.write_text(lock_hash, encoding='utf-8')
+            env = {**os.environ, 'PATH': str(Path(node).resolve().parent) + os.pathsep + os.environ.get('PATH', '')}
+            subprocess.run([*npm, 'ci', '--omit=dev', '--ignore-scripts', '--no-audit', '--no-fund'],
+                           cwd=ROOT, check=True, timeout=300, env=env)
+            marker.write_text(expected, encoding='utf-8')
         with socket.socket() as sock:
             sock.bind(('127.0.0.1', 0))
             self.port = sock.getsockname()[1]

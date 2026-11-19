@@ -112,9 +112,39 @@ class SingleRuntimeTests(unittest.TestCase):
             self.assertIsNot(third, second, 'a crashed server is restarted')
         finally:
             rt.server_version = original
-            if rt._runtime is not None:
-                rt._runtime.close()
-                rt._runtime, rt._runtime_key = None, None
+            if rt._STATE.runtime is not None:
+                rt._STATE.runtime.close()
+                rt._STATE.runtime, rt._STATE.key = None, None
+
+
+    def test_state_survives_module_reload(self):
+        import importlib
+        import streamlit_runtime as rt
+        state = rt._STATE
+        reloaded = importlib.reload(rt)
+        self.assertIs(reloaded._STATE, state, 'a reload must not lose track of the running Node server')
+
+
+class DeployHelpersTests(unittest.TestCase):
+    def test_bundled_npm_is_used_with_downloaded_node(self):
+        import tempfile
+        from pathlib import Path
+        from streamlit_runtime import npm_command
+        with tempfile.TemporaryDirectory() as tmp:
+            node = Path(tmp) / 'node-v22.0.0-linux-x64' / 'bin' / 'node'
+            cli = Path(tmp) / 'node-v22.0.0-linux-x64' / 'lib' / 'node_modules' / 'npm' / 'bin' / 'npm-cli.js'
+            cli.parent.mkdir(parents=True); node.parent.mkdir(parents=True)
+            node.write_text(''); cli.write_text('')
+            self.assertEqual(npm_command(str(node)), [str(node), str(cli.resolve())])
+
+    def test_frontend_copy_is_published_once_per_version(self):
+        from streamlit_runtime import frontend_version, prepare_frontend
+        first = prepare_frontend()
+        self.assertEqual(first.name, frontend_version()[:12])
+        self.assertTrue((first / '.ready').exists())
+        mtime = (first / 'index.html').stat().st_mtime_ns
+        self.assertEqual(prepare_frontend(), first)
+        self.assertEqual((first / 'index.html').stat().st_mtime_ns, mtime, 'files are never rewritten in place')
 
 
 if __name__ == '__main__':
