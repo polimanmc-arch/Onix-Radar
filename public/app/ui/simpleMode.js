@@ -209,8 +209,8 @@ window.StockScannerUI = window.StockScannerUI || {};
   function SimpleMode(){
     const C = core();
     const markets = C.SIMPLE_MARKETS, groups = C.SIMPLE_MARKET_GROUPS, strategies = C.SIMPLE_STRATEGIES, periods = C.SIMPLE_PERIODS;
-    const [marketId, setMarketId] = useState('DOW30');
-    const [strategyId, setStrategyId] = useState('base');
+    const [marketId, setMarketId] = useState('SP500');
+    const [strategyId, setStrategyId] = useState(null); // nada elegido al entrar: se explica paso a paso
     const [tipOpen, setTipOpen] = useState(null);
     const [selTicker, setSelTicker] = useState(null);
     const [weightView, setWeightView] = useState('stock');
@@ -225,7 +225,6 @@ window.StockScannerUI = window.StockScannerUI || {};
     const [games, setGames] = useState(loadGames);
     const cacheRef = useRef({});
     const abortRef = useRef(null);
-    const sectionRef = useRef(null);
     useEffect(() => () => abortRef.current?.abort(), []);
     // Cronómetro visible mientras corre el análisis (para ver que sigue trabajando).
     useEffect(() => {
@@ -239,25 +238,37 @@ window.StockScannerUI = window.StockScannerUI || {};
     const countOf = m => C.simpleUniverseReady(m) ? C.simpleUniverseTickers(m).length.toLocaleString('es-ES') : '≈' + (m.approx || 0).toLocaleString('es-ES');
     // Filtro del S&P 500: activado de serie en la estrategia base; se puede poner o quitar en cualquiera.
     const [mktFilter, setMktFilter] = useState({});
-    const mktOnOf = st => mktFilter[st.id] ?? !!st.marketDefault;
+    const mktOnOf = st => !!st && (mktFilter[st.id] ?? !!st.marketDefault);
     const effOf = st => C.simpleWithMarketFilter(st, mktOnOf(st));
     const tagOf = st => st && mktOnOf(st) !== !!st.marketDefault ? (mktOnOf(st) ? ' + filtro S&P' : ' sin filtro S&P') : '';
     const baseStrategy = strategies.find(s => s.id === strategyId);
     const strategy = useMemo(() => effOf(baseStrategy), [baseStrategy, mktFilter]);
     const period = periods.find(p => p.years === years) || periods[periods.length - 1];
-    const running = stage !== 'idle' && stage !== 'done';
-    const ready = market && strategy && !running;
 
-    const execute = async () => {
-      if(!ready) return;
+    const running = stage !== 'idle';
+    const ready = market && strategy && !running;
+    // Si cambian mercado, estrategia o filtro, los resultados anteriores ya no corresponden.
+    useEffect(() => { if(!abortRef.current) { setRun(null); setError(null); } }, [marketId, strategyId, mktFilter]);
+
+    const n = x => Number(x).toLocaleString('es-ES');
+    const scrollSoon = id => setTimeout(() => { if(typeof document !== 'undefined') document.getElementById(id)?.scrollIntoView?.({ behavior: 'smooth', block: 'start' }); }, 80);
+    // Cada paso (3, 4 y 5) se lanza con su propio botón, para poder explicarlo uno a uno.
+    const runStep = async (id, fn) => {
       const ac = new AbortController(); abortRef.current = ac;
-      const cfg = { market, strategy, period, tag: tagOf(baseStrategy) };
-      setError(null); setRun({ ...cfg }); setSelTicker(null); setStartedAt(Date.now()); setProgressPct(null);
-      const n = n => Number(n).toLocaleString('es-ES');
-      setTimeout(() => sectionRef.current?.scrollIntoView?.({ behavior: 'smooth', block: 'start' }), 60);
-      try{
-        // 1. Escáner
-        setStage('scan'); setProgress('Preparando la descarga de precios');
+      setError(null); setStage(id); setStartedAt(Date.now()); setProgressPct(null);
+      scrollSoon('simple-loading');
+      try{ await fn(ac); scrollSoon('simple-panel-' + id); }
+      catch(e){ setError(e?.name === 'AbortError' ? 'Paso cancelado.' : (e?.message || 'Algo salió mal. Inténtalo de nuevo.')); }
+      finally{ abortRef.current = null; setStage('idle'); setProgress(''); setProgressPct(null); setStartedAt(null); }
+    };
+
+    // Paso 3: escáner
+    const runScan = () => {
+      if(!ready) return undefined;
+      const cfg = { market, strategy, tag: tagOf(baseStrategy) };
+      setRun({ ...cfg }); setSelTicker(null);
+      return runStep('scan', async ac => {
+        setProgress('Preparando la descarga de precios');
         if(!C.simpleUniverseReady(market)) setProgress('Descargando la lista de todas las acciones del mercado');
         const tickers = await C.resolveSimpleUniverse(market);
         // También el S&P 500 si la estrategia usa el filtro de mercado.
@@ -267,19 +278,31 @@ window.StockScannerUI = window.StockScannerUI || {};
         setProgressPct(null);
         const scan = C.scanSimpleMarket({ tickers, dataByTicker: cacheRef.current, strategy });
         setRun(r => ({ ...r, scan: { ...scan, total: tickers.length } }));
+      });
+    };
 
-        // 2. Portafolio de Markowitz con las mejores candidatas del escáner
-        setStage('portfolio'); setProgress('Probando 10.000 combinaciones de pesos');
+    // Paso 4: portafolio de Markowitz con las mejores candidatas del escáner
+    const runPortfolio = () => {
+      if(!run?.scan || running) return undefined;
+      const { strategy: st, scan: sc } = run;
+      return runStep('portfolio', async () => {
+        setProgress('Probando 10.000 combinaciones de pesos');
         let portfolio = null, portfolioError = null;
-        if(scan.passing.length >= 2){
+        if(sc.passing.length >= 2){
           const fetchSectors = async list => { try{ const r = await fetch('/api/sectors?symbols=' + encodeURIComponent(list.join(','))); return r.ok ? r.json() : {}; }catch{ return {}; } };
-          const out = await C.buildPortfolioWorkflow({ ...C.buildSimplePortfolioOptions({ strategy, candidates: scan.passing, cacheRef, fetchSectors }), setPortfolio: p => { portfolio = p; } });
+          const out = await C.buildPortfolioWorkflow({ ...C.buildSimplePortfolioOptions({ strategy: st, candidates: sc.passing, cacheRef, fetchSectors }), setPortfolio: p => { portfolio = p; } });
           if(!out?.ok) portfolioError = out?.message || 'No se pudo construir el portafolio.';
         }else portfolioError = 'Hoy no hay suficientes acciones que cumplan la estrategia para construir un portafolio (hacen falta al menos 2).';
         setRun(r => ({ ...r, portfolio, portfolioError }));
+      });
+    };
 
-        // 3. Backtest de la estrategia
-        setStage('backtest'); setProgress('Preparando el backtest'); setProgressPct(null);
+    // Paso 5: backtest de la estrategia
+    const runBacktest = () => {
+      if(!run?.scan || running) return undefined;
+      const cfg = { market: run.market, strategy: run.strategy, period };
+      return runStep('backtest', async ac => {
+        setProgress('Preparando el backtest');
         let raw = null;
         const out = await C.runBacktestWorkflow({
           ...C.buildSimpleBacktestOptions(cfg), dataCacheRef: cacheRef, abortSignal: ac.signal,
@@ -291,24 +314,15 @@ window.StockScannerUI = window.StockScannerUI || {};
         });
         const summary = raw && C.summarizeSimpleResult(raw);
         const backtest = summary ? { summary, annReturn: raw.annReturn, sharpe: raw.sharpe, commissions: raw.totalCommissionPaid } : null;
-        setRun(r => ({ ...r, backtest, backtestError: backtest ? null : (out?.message || 'No hubo datos suficientes para el backtest.') }));
+        setRun(r => ({ ...r, period, backtest, backtestError: backtest ? null : (out?.message || 'No hubo datos suficientes para el backtest.') }));
         if(summary){
-          const game = { id: Date.now(), market: market.name, flag: market.icon, strategy: strategy.name + cfg.tag, icon: strategy.icon, period: period.label, ret: summary.ret, benchRet: summary.benchRet, stars: summary.stars };
+          const game = { id: Date.now(), market: cfg.market.name, flag: cfg.market.icon, strategy: cfg.strategy.name + (run.tag || ''), icon: cfg.strategy.icon, period: period.label, ret: summary.ret, benchRet: summary.benchRet, stars: summary.stars };
           setGames(prev => { const next = [game, ...prev].slice(0, 30); saveGames(next); return next; });
         }
-        setStage('done');
-      }catch(e){
-        setStage('idle');
-        setError(e?.name === 'AbortError' ? 'Análisis cancelado.' : (e?.message || 'Algo salió mal. Inténtalo de nuevo.'));
-      }finally{ abortRef.current = null; setProgress(''); setProgressPct(null); setStartedAt(null); }
+      });
     };
 
-    const stageState = id => {
-      const order = STAGES.map(s => s.id), cur = order.indexOf(stage);
-      if(run?.[id + 'Error']) return 'error';
-      if(stage === 'done' || stage === 'idle') return run?.[id] ? 'done' : 'todo';
-      return order.indexOf(id) < cur ? 'done' : order.indexOf(id) === cur ? 'active' : 'todo';
-    };
+    const stageState = id => run?.[id + 'Error'] ? 'error' : run?.[id] ? 'done' : stage === id ? 'active' : 'todo';
     const ranking = [...games].sort((a, b) => b.ret - a.ret).slice(0, 8);
     const medal = i => ['🥇', '🥈', '🥉'][i] || `${i + 1}.`;
     const cur = run?.market?.currency;
@@ -411,31 +425,14 @@ window.StockScannerUI = window.StockScannerUI || {};
               {[true, false].map(on => <button type="button" key={String(on)} aria-pressed={mktOnOf(baseStrategy) === on} disabled={running}
                 onClick={() => setMktFilter(m => ({ ...m, [baseStrategy.id]: on }))}>{on ? 'Activado' : 'Quitado'}</button>)}
             </div>}
-            <div className="simple-periods" role="group" aria-label="Periodo del backtest">
-              <span>Backtest:</span>
-              {periods.map(p => <button type="button" key={p.years} aria-pressed={p.years === years} onClick={() => setYears(p.years)} disabled={running}>{p.label}</button>)}
-            </div>
-            {!running && <button type="button" className="simple-play" onClick={execute} disabled={!ready}>
-              {strategy ? '▶  Ejecutar análisis' : 'Elige una estrategia para empezar'}
-            </button>}
-            {running && <button type="button" className="simple-link" onClick={() => abortRef.current?.abort()}>Cancelar</button>}
+            <button type="button" className="simple-play" onClick={runScan} disabled={!ready}>
+              {!strategy ? 'Elige una estrategia para empezar' : run?.scan ? '↻  Paso 3 · Volver a escanear' : '▶  Paso 3 · Ejecutar el escáner'}
+            </button>
           </div>
-          {error && <div className="simple-error" role="alert">{error}</div>}
+          {error && !run && <div className="simple-error" role="alert">{error}</div>}
         </div>
 
-        {run && <div ref={sectionRef}>
-          {running && <div className="simple-loading" role="status" aria-live="polite">
-            <span className="simple-spinner" aria-hidden="true"/>
-            <div className="simple-loading-body">
-              <div className="simple-loading-top">
-                <b>{`Paso ${{ scan: 3, portfolio: 4, backtest: 5 }[stage]} de 5 · ${(STAGES.find(x => x.id === stage) || {}).label || ''}`}</b>
-                <span>{`${progressPct != null ? Math.round(progressPct) + ' % · ' : ''}${startedAt ? Math.max(0, Math.round((Date.now() - startedAt) / 1000)) : 0} s`}</span>
-              </div>
-              <div className="simple-loading-text">{progress || 'Trabajando…'}</div>
-              <div className={'simple-loading-bar' + (progressPct == null ? ' indeterminate' : '')}><i style={progressPct == null ? undefined : { width: Math.max(2, progressPct) + '%' }}/></div>
-              {run.market?.heavy && <small>Universo muy grande: la primera descarga puede tardar 1-2 minutos. Después queda en memoria y las siguientes partidas son mucho más rápidas.</small>}
-            </div>
-          </div>}
+        {run && <div>
           {scan && <section id="simple-panel-scan" className="simple-panel" aria-label="Escáner">
             <header><span className={'simple-panel-n' + (done('scan') ? ' done' : '')}>3</span><div>
               <h2>Escáner</h2>
@@ -473,6 +470,10 @@ window.StockScannerUI = window.StockScannerUI || {};
             </div>
               : <p className="simple-note">Hoy ninguna acción del mercado cumple las reglas: la estrategia esperaría.</p>}
           </section>}
+          {scan && !pf && !run.portfolioError && !running && <div className="simple-next">
+            <p><b>Siguiente:</b> con las mejores acciones del escáner, Markowitz busca el reparto del dinero con la mejor rentabilidad por unidad de riesgo.</p>
+            <button type="button" className="simple-play" onClick={runPortfolio}>▶  Paso 4 · Construir el portafolio</button>
+          </div>}
 
           {run.portfolioError && <section id="simple-panel-portfolio" className="simple-panel" aria-label="Portafolio"><header><span className="simple-panel-n error">4</span><div><h2>Portafolio de Markowitz</h2><p>{run.portfolioError}</p></div></header></section>}
           {pf && <section id="simple-panel-portfolio" className="simple-panel" aria-label="Portafolio de Markowitz">
@@ -503,11 +504,19 @@ window.StockScannerUI = window.StockScannerUI || {};
             </div>
           </section>}
 
+          {(pf || run.portfolioError) && !bt && !run.backtestError && !running && <div className="simple-next">
+            <p><b>Siguiente:</b> {`simular la estrategia en el pasado, semana a semana, y compararla con comprar ${run.market.holdLabel} y esperar.`}</p>
+            <div className="simple-periods" role="group" aria-label="Periodo del backtest">
+              <span>Periodo:</span>
+              {periods.map(p => <button type="button" key={p.years} aria-pressed={p.years === years} onClick={() => setYears(p.years)}>{p.label}</button>)}
+            </div>
+            <button type="button" className="simple-play" onClick={runBacktest}>▶  Paso 5 · Ejecutar el backtest</button>
+          </div>}
           {run.backtestError && <section id="simple-panel-backtest" className="simple-panel" aria-label="Backtest"><header><span className="simple-panel-n error">5</span><div><h2>Backtest</h2><p>{run.backtestError}</p></div></header></section>}
           {bt && <section id="simple-panel-backtest" className="simple-panel simple-result" aria-label="Resultado del backtest">
             <header><span className={'simple-panel-n' + (done('backtest') ? ' done' : '')}>5</span><div>
               <h2>Backtest · ¿habría funcionado en el pasado?</h2>
-              <p>{`La estrategia se aplica semana a semana desde ${monthYear(bt.summary.start)} con 10.000 ${cur}: compra cuando se cumplen las reglas, vende cuando se cumplen las de salida, reparte el dinero según rentabilidad/riesgo y descuenta comisiones.`}</p>
+              <p>{`${run.period?.label ? 'Periodo: ' + run.period.label + '. ' : ''}La estrategia se aplica semana a semana desde ${monthYear(bt.summary.start)} con 10.000 ${cur}: compra cuando se cumplen las reglas, vende cuando se cumplen las de salida, reparte el dinero según rentabilidad/riesgo y descuenta comisiones.`}</p>
             </div></header>
             <div className="simple-result-head">
               <div className="simple-result-title">{bt.summary.headline}</div>
@@ -529,6 +538,20 @@ window.StockScannerUI = window.StockScannerUI || {};
             </div>
             <div className="simple-stars-help"><span>⭐ ganar dinero</span><span>⭐ ganar al mercado</span><span>⭐ caer menos que el mercado</span></div>
           </section>}
+          {running && <div id="simple-loading" className="simple-loading" role="status" aria-live="polite">
+            <span className="simple-spinner" aria-hidden="true"/>
+            <div className="simple-loading-body">
+              <div className="simple-loading-top">
+                <b>{`Paso ${{ scan: 3, portfolio: 4, backtest: 5 }[stage]} de 5 · ${(STAGES.find(x => x.id === stage) || {}).label || ''}`}</b>
+                <span>{`${progressPct != null ? Math.round(progressPct) + ' % · ' : ''}${startedAt ? Math.max(0, Math.round((Date.now() - startedAt) / 1000)) : 0} s`}</span>
+              </div>
+              <div className="simple-loading-text">{progress || 'Trabajando…'}</div>
+              <div className={'simple-loading-bar' + (progressPct == null ? ' indeterminate' : '')}><i style={progressPct == null ? undefined : { width: Math.max(2, progressPct) + '%' }}/></div>
+              {stage === 'scan' && run.market?.heavy && <small>Universo muy grande: la primera descarga puede tardar 1-2 minutos. Después queda en memoria y las siguientes partidas son mucho más rápidas.</small>}
+            </div>
+            <button type="button" className="simple-link" onClick={() => abortRef.current?.abort()}>Cancelar</button>
+          </div>}
+          {error && <div className="simple-error" role="alert">{error}</div>}
         </div>}
 
         {ranking.length > 0 && <section className="simple-ranking" aria-label="Tus partidas">

@@ -425,15 +425,28 @@ test('simple mode: first visit opens the 3-step simulator, plays a game and can 
   assert.equal(tree.root.findByProps({'aria-label':'Ver el detalle de Estrategia base Radar Onix'}).type,'button');
   assert.ok(json().includes('Stoch %K(1) < 20')&&json().includes('WMA 30'),'base strategy rules and indicators are readable');
   assert.equal(tree.root.findAllByProps({className:'simple-rule'}).length,0,'dense rules live in the tooltip, not on the card');
+  // Al entrar: S&P 500 elegido, ninguna estrategia y nada se ejecuta solo.
+  assert.equal(btn('S&P 500').props['aria-pressed'],true,'S&P 500 by default');
+  assert.equal(tree.root.findAll(n=>n.type==='button'&&String(n.props.className||'').includes('simple-card-strategy')&&n.props['aria-pressed']===true).length,0,'no strategy selected');
+  assert.equal(btn('Elige una estrategia para empezar').props.disabled,true);
   await Renderer.act(async()=>btn('Europa').props.onClick());
   assert.ok(btn('IBEX 35')&&btn('Toda Europa'));
   await Renderer.act(async()=>btn('Acciones de EE. UU.').props.onClick());
   await Renderer.act(async()=>btn('Dow Jones 30').props.onClick());
   await Renderer.act(async()=>btn('Seguir la tendencia').props.onClick());
-  await Renderer.act(async()=>btn('1 año').props.onClick());
-  await Renderer.act(async()=>{ await btn('Ejecutar análisis').props.onClick(); });
-  // Las tres etapas del proceso quedan a la vista.
+  // Paso 3: sólo el escáner; el resto espera a su botón.
+  await Renderer.act(async()=>{ await btn('Paso 3 · Ejecutar el escáner').props.onClick(); });
   assert.equal(tree.root.findAllByProps({'aria-label':'Escáner'}).length,1,'scanner section');
+  assert.equal(tree.root.findAllByProps({'aria-label':'Portafolio de Markowitz'}).length,0,'Markowitz waits for its button');
+  assert.equal(tree.root.findAllByProps({'aria-label':'Resultado del backtest'}).length,0,'backtest waits for its button');
+  assert.ok(!btn('Paso 5 · Ejecutar el backtest'));
+  // Paso 4: Markowitz.
+  await Renderer.act(async()=>{ await btn('Paso 4 · Construir el portafolio').props.onClick(); });
+  assert.equal(tree.root.findAllByProps({'aria-label':'Resultado del backtest'}).length,0);
+  // Paso 5: backtest con el periodo elegido junto a su botón.
+  await Renderer.act(async()=>btn('1 año').props.onClick());
+  await Renderer.act(async()=>{ await btn('Paso 5 · Ejecutar el backtest').props.onClick(); });
+  // Las tres etapas del proceso quedan a la vista.
   assert.equal(tree.root.findAllByProps({'aria-label':'Portafolio de Markowitz'}).length,1,'Markowitz section');
   assert.equal(tree.root.findAllByProps({'aria-label':'Frontera eficiente de Markowitz con el portafolio elegido'}).length,1,'efficient frontier');
   assert.equal(tree.root.findAllByProps({'aria-label':'Resultado del backtest'}).length,1,'backtest section');

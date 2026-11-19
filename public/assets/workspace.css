@@ -421,3 +421,10 @@ body,[data-theme="light"] body{background:var(--bg-0);background-image:none}
 .simple-ma-label{top:6px;left:6px}
 .simple-ma-label i{height:3px}
 .simple-ma-label i.cmp{height:0;background:none!important;border-top:2px dashed var(--chart-muted-line,#6b7890)}
+
+/* ── Modo simple: cada paso con su botón ─── */
+.simple-next{display:flex;flex-wrap:wrap;align-items:center;justify-content:space-between;gap:14px 20px;margin-top:18px;padding:18px 20px;border:2px dashed var(--border);border-radius:16px;background:var(--bg-1)}
+.simple-next p{flex:1 1 320px;margin:0;font-size:14px;color:var(--text-1)}
+.simple-next p b{color:var(--text-0)}
+.simple-next .simple-periods{margin:0}
+.simple-loading>.simple-link{align-self:center;flex:0 0 auto}
