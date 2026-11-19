@@ -422,11 +422,16 @@ test('simple mode: first visit opens the 3-step simulator, plays a game and can 
   assert.equal(btn('Elige una estrategia').props.disabled,true);
   await Renderer.act(async()=>btn('Seguir la tendencia').props.onClick());
   await Renderer.act(async()=>btn('1 año').props.onClick());
-  await Renderer.act(async()=>{ await btn('Simular con 10.000').props.onClick(); });
-  const result=tree.root.findAllByProps({'aria-label':'Resultado de la simulación'});
-  assert.equal(result.length,1,'result shown');
-  assert.ok(json().includes('Tu estrategia')&&json().includes('Comprar el Dow Jones 30 y esperar'));
-  assert.equal(tree.root.findAllByProps({className:'simple-stars'}).length>=1,true);
+  await Renderer.act(async()=>{ await btn('Ejecutar análisis').props.onClick(); });
+  // Las tres etapas del proceso quedan a la vista.
+  assert.equal(tree.root.findAllByProps({'aria-label':'Escáner'}).length,1,'scanner section');
+  assert.equal(tree.root.findAllByProps({'aria-label':'Portafolio de Markowitz'}).length,1,'Markowitz section');
+  assert.equal(tree.root.findAllByProps({'aria-label':'Frontera eficiente de Markowitz con el portafolio elegido'}).length,1,'efficient frontier');
+  assert.equal(tree.root.findAllByProps({'aria-label':'Resultado del backtest'}).length,1,'backtest section');
+  assert.ok(json().includes('Peso por acción')&&json().includes('Peso por sector'));
+  assert.ok(json().includes('Comprar el Dow Jones 30 y esperar')&&json().includes('Ratio de Sharpe'));
+  assert.ok(tree.root.findAllByProps({className:'simple-stars'}).length>=1);
+  assert.equal(tree.root.findAll(n=>n.type==='li'&&n.props['data-state']==='done').length,3,'all stages done');
   assert.equal(tree.root.findAllByProps({'aria-label':'Tus partidas'}).length,1);
   // Cambiar a modo experto muestra la app completa y se recuerda.
   await Renderer.act(async()=>tree.root.find(n=>n.type==='button'&&n.children.join('')==='Experto').props.onClick());

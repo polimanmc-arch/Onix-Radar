@@ -1,5 +1,6 @@
-// Modo simple: simulador de estrategias en 3 pasos, pensado para quien ve la app por primera vez.
-// Reutiliza el backtest y el scanner del modo experto con configuraciones predefinidas.
+// Modo simple: recorrido guiado por el proceso completo, pensado para presentar la app.
+// Mercado + estrategia → 1. Escáner → 2. Portafolio de Markowitz → 3. Backtest.
+// Reutiliza el escáner, el optimizador de portafolios y el backtest del modo experto.
 window.StockScannerUI = window.StockScannerUI || {};
 (function(){
   const { useState, useRef, useEffect } = React;
@@ -7,9 +8,14 @@ window.StockScannerUI = window.StockScannerUI || {};
   const core = () => window.StockScannerCore;
 
   const money = (v, cur) => (Number.isFinite(v) ? Math.round(v).toLocaleString('es-ES') : '—') + ' ' + cur;
-  const pct = (v, d = 1) => (Number.isFinite(v) ? (v >= 0 ? '+' : '') + (v * 100).toFixed(d).replace('.', ',') + ' %' : '—');
+  const pct = (v, d = 1, sign = true) => (Number.isFinite(v) ? (sign && v >= 0 ? '+' : '') + (v * 100).toFixed(d).replace('.', ',') + ' %' : '—');
+  const num = (v, d = 2) => (Number.isFinite(v) ? v.toFixed(d).replace('.', ',') : '—');
   const year = t => (t ? new Date(t * 1000).getFullYear() : '');
   const monthYear = t => (t ? new Date(t * 1000).toLocaleDateString('es-ES', { month: 'long', year: 'numeric' }) : '');
+  const SECTOR_ES = { Technology: 'Tecnología', 'Financial Services': 'Financiero', Healthcare: 'Salud', 'Consumer Cyclical': 'Consumo cíclico',
+    'Consumer Defensive': 'Consumo básico', Industrials: 'Industria', Energy: 'Energía', 'Communication Services': 'Comunicaciones',
+    'Basic Materials': 'Materiales', 'Real Estate': 'Inmobiliario', Utilities: 'Servicios públicos', Other: 'Otros', 'N/A': 'Otros' };
+  const sectorEs = s => SECTOR_ES[s] || s || 'Otros';
 
   function loadGames(){ try{ const v = JSON.parse(localStorage.getItem(GAMES_KEY) || '[]'); return Array.isArray(v) ? v : []; }catch{ return []; } }
   function saveGames(list){ try{ localStorage.setItem(GAMES_KEY, JSON.stringify(list.slice(0, 30))); }catch{} }
@@ -20,7 +26,7 @@ window.StockScannerUI = window.StockScannerUI || {};
     </span>;
   }
 
-  // Gráfico de dos líneas: estrategia frente al índice.
+  // Estrategia frente al índice.
   function SimpleChart({ summary, currency, marketName }){
     const W = 640, H = 230, padL = 58, padR = 14, padT = 12, padB = 26;
     const a = summary.curve, b = summary.bench;
@@ -34,7 +40,7 @@ window.StockScannerUI = window.StockScannerUI || {};
     const ticks = [lo + rg * 0.1, summary.capital, hi - rg * 0.1].filter((v, i, arr) => arr.indexOf(v) === i);
     return (
       <figure className="simple-chart">
-        <svg viewBox={`0 0 ${W} ${H}`} role="img" aria-label={`Evolución de ${currency === '€' ? '10.000 €' : '10.000 $'}: estrategia frente al ${marketName}`}>
+        <svg viewBox={`0 0 ${W} ${H}`} role="img" aria-label={`Evolución de 10.000 ${currency}: estrategia frente al ${marketName}`}>
           {ticks.map(v => <g key={v}>
             <line x1={padL} x2={W - padR} y1={y(v)} y2={y(v)} stroke="var(--border)" strokeDasharray={v === summary.capital ? '4 4' : '0'} strokeWidth="1"/>
             <text x={padL - 8} y={y(v) + 4} textAnchor="end" fontSize="11" fill="var(--text-2)">{Math.round(v).toLocaleString('es-ES')}</text>
@@ -46,173 +52,273 @@ window.StockScannerUI = window.StockScannerUI || {};
           <text x={W - padR} y={H - 6} fontSize="11" fill="var(--text-2)" textAnchor="end">{year(t1)}</text>
         </svg>
         <figcaption className="simple-legend">
-          <span><i style={{ background: 'var(--accent)' }}/>Tu estrategia</span>
+          <span><i style={{ background: 'var(--accent)' }}/>Estrategia</span>
           <span><i className="dashed"/>{`Comprar el ${marketName} y esperar`}</span>
         </figcaption>
       </figure>
     );
   }
 
-  function SimpleMode({ notify }){
+  // Frontera eficiente: miles de combinaciones de pesos (riesgo, rentabilidad) y el portafolio elegido.
+  function FrontierChart({ portfolio }){
+    const pts = (portfolio.frontier || []).filter(p => Number.isFinite(p.vol) && Number.isFinite(p.ret));
+    const chosen = portfolio.chosenPoint, ew = portfolio.altEqualWeightPoint;
+    if(pts.length < 5 || !chosen) return null;
+    const W = 460, H = 280, padL = 46, padR = 12, padT = 12, padB = 36;
+    const xs = [...pts.map(p => p.vol), chosen.vol], ys = [...pts.map(p => p.ret), chosen.ret];
+    const x0 = Math.min(...xs) * 0.95, x1 = Math.max(...xs) * 1.05, y0 = Math.min(...ys), y1 = Math.max(...ys);
+    const yr = (y1 - y0) || 1, ylo = y0 - yr * 0.08, yhi = y1 + yr * 0.08;
+    const x = v => padL + (v - x0) / ((x1 - x0) || 1) * (W - padL - padR);
+    const y = v => padT + (1 - (v - ylo) / ((yhi - ylo) || 1)) * (H - padT - padB);
+    const sh = pts.map(p => p.sharpe).filter(Number.isFinite), smin = Math.min(...sh), smax = Math.max(...sh);
+    const op = s => (Number.isFinite(s) && smax > smin ? 0.15 + 0.65 * (s - smin) / (smax - smin) : 0.3);
+    const ticks = n => Array.from({ length: n }, (_, i) => i / (n - 1));
+    return (
+      <figure className="simple-frontier">
+        <svg viewBox={`0 0 ${W} ${H}`} role="img" aria-label="Frontera eficiente de Markowitz con el portafolio elegido">
+          {ticks(4).map(f => { const v = ylo + (yhi - ylo) * f; return <g key={'y' + f}>
+            <line x1={padL} x2={W - padR} y1={y(v)} y2={y(v)} stroke="var(--border)" strokeWidth="1"/>
+            <text x={padL - 6} y={y(v) + 4} textAnchor="end" fontSize="10" fill="var(--text-2)">{Math.round(v) + '%'}</text></g>; })}
+          {ticks(4).map(f => { const v = x0 + (x1 - x0) * f; return <text key={'x' + f} x={x(v)} y={H - padB + 14} textAnchor="middle" fontSize="10" fill="var(--text-2)">{Math.round(v) + '%'}</text>; })}
+          {pts.map((p, i) => <circle key={i} cx={x(p.vol)} cy={y(p.ret)} r="2.4" fill="var(--accent)" opacity={op(p.sharpe)}/>)}
+          {ew && <g><circle cx={x(ew.vol)} cy={y(ew.ret)} r="6" fill="var(--bg-1)" stroke="var(--text-2)" strokeWidth="2"/></g>}
+          <g><circle cx={x(chosen.vol)} cy={y(chosen.ret)} r="9" fill="#f5c542" stroke="var(--bg-1)" strokeWidth="2"/>
+            <text x={x(chosen.vol)} y={y(chosen.ret) + 4} textAnchor="middle" fontSize="11" fontWeight="800" fill="#1d1f29">★</text></g>
+          <text x={(padL + W - padR) / 2} y={H - 4} textAnchor="middle" fontSize="11" fill="var(--text-2)">Riesgo (volatilidad anual)</text>
+          <text x={12} y={(padT + H - padB) / 2} textAnchor="middle" fontSize="11" fill="var(--text-2)" transform={`rotate(-90 12 ${(padT + H - padB) / 2})`}>Rentabilidad esperada</text>
+        </svg>
+        <figcaption className="simple-legend">
+          <span><i style={{ background: 'var(--accent)', opacity: .6 }}/>Combinaciones probadas</span>
+          <span><b style={{ color: '#f5c542' }}>★</b> Máximo Sharpe (elegido)</span>
+          {ew && <span><i className="ring"/>Mismo peso en todas</span>}
+        </figcaption>
+      </figure>
+    );
+  }
+
+  function Bars({ items, color = 'var(--accent)' }){
+    const max = Math.max(...items.map(i => i.weight), 0.0001);
+    return <div className="simple-bars">{items.map(it => (
+      <div key={it.key} className="simple-bar-row">
+        <div className="simple-bar-label"><b>{it.label}</b>{it.sub && <small>{it.sub}</small>}</div>
+        <div className="simple-bar-track"><span style={{ width: (it.weight / max * 100) + '%', background: color }}/></div>
+        <div className="simple-bar-value">{pct(it.weight, 1, false)}{it.extra && <small>{it.extra}</small>}</div>
+      </div>
+    ))}</div>;
+  }
+
+  const STAGES = [ { id: 'scan', label: 'Escáner' }, { id: 'portfolio', label: 'Portafolio Markowitz' }, { id: 'backtest', label: 'Backtest' } ];
+
+  function SimpleMode(){
     const C = core();
     const markets = C.SIMPLE_MARKETS, strategies = C.SIMPLE_STRATEGIES, periods = C.SIMPLE_PERIODS;
     const [marketId, setMarketId] = useState('DOW30');
     const [strategyId, setStrategyId] = useState(null);
     const [years, setYears] = useState(3);
-    const [running, setRunning] = useState(false);
-    const [progress, setProgress] = useState(null);
-    const [outcome, setOutcome] = useState(null);
+    const [stage, setStage] = useState('idle');
+    const [progress, setProgress] = useState('');
+    const [run, setRun] = useState(null);
     const [error, setError] = useState(null);
     const [games, setGames] = useState(loadGames);
-    const [howOpen, setHowOpen] = useState(false);
     const cacheRef = useRef({});
     const abortRef = useRef(null);
-    const resultRef = useRef(null);
-    const strategyRef = useRef(null);
+    const sectionRef = useRef(null);
     useEffect(() => () => abortRef.current?.abort(), []);
 
     const market = markets.find(m => m.id === marketId);
     const strategy = strategies.find(s => s.id === strategyId);
     const period = periods.find(p => p.years === years) || periods[periods.length - 1];
+    const running = stage !== 'idle' && stage !== 'done';
     const ready = market && strategy && !running;
 
-    const simulate = async () => {
+    const execute = async () => {
       if(!ready) return;
       const ac = new AbortController(); abortRef.current = ac;
-      setRunning(true); setError(null); setOutcome(null); setProgress({ pct: 2, label: 'Preparando' });
+      const cfg = { market, strategy, period };
+      setError(null); setRun({ ...cfg });
+      setTimeout(() => sectionRef.current?.scrollIntoView?.({ behavior: 'smooth', block: 'start' }), 60);
       try{
+        // 1. Escáner
+        setStage('scan'); setProgress('Descargando precios semanales');
+        const tickers = window.StockScannerConfig.UNIVERSE_PRESETS[market.preset]?.tickers || [];
+        await C.loadSimpleWeekly({ tickers, cacheRef, signal: ac.signal, onProgress: (d, t) => setProgress(`Descargando precios ${d} de ${t}`) });
+        const scan = C.scanSimpleMarket({ tickers, dataByTicker: cacheRef.current, strategy });
+        setRun(r => ({ ...r, scan: { ...scan, total: tickers.length } }));
+
+        // 2. Portafolio de Markowitz con las mejores candidatas del escáner
+        setStage('portfolio'); setProgress('Probando 10.000 combinaciones de pesos');
+        let portfolio = null, portfolioError = null;
+        if(scan.passing.length >= 2){
+          const fetchSectors = async list => { try{ const r = await fetch('/api/sectors?symbols=' + encodeURIComponent(list.join(','))); return r.ok ? r.json() : {}; }catch{ return {}; } };
+          const out = await C.buildPortfolioWorkflow({ ...C.buildSimplePortfolioOptions({ strategy, candidates: scan.passing, cacheRef, fetchSectors }), setPortfolio: p => { portfolio = p; } });
+          if(!out?.ok) portfolioError = out?.message || 'No se pudo construir el portafolio.';
+        }else portfolioError = 'Hoy no hay suficientes acciones que cumplan la estrategia para construir un portafolio (hacen falta al menos 2).';
+        setRun(r => ({ ...r, portfolio, portfolioError }));
+
+        // 3. Backtest de la estrategia
+        setStage('backtest'); setProgress('Simulando semana a semana');
         let raw = null;
         const out = await C.runBacktestWorkflow({
-          ...C.buildSimpleBacktestOptions({ market, strategy, period }),
-          dataCacheRef: cacheRef, abortSignal: ac.signal,
+          ...C.buildSimpleBacktestOptions(cfg), dataCacheRef: cacheRef, abortSignal: ac.signal,
           setBtRunning: () => {}, setTab: () => {}, setBacktest: r => { raw = r; },
-          setBtProgress: p => setProgress({ pct: Math.max(2, Math.min(96, p?.pct || 0)), label: ({ data: 'Descargando precios', benchmark: 'Preparando el índice', simulation: 'Simulando semana a semana', results: 'Calculando resultados' })[p?.stage] || 'Preparando' }),
+          setBtProgress: p => p?.stage === 'simulation' && setProgress(`Simulando semana a semana… ${Math.round(p.phasePct || 0)} %`),
         });
         const summary = raw && C.summarizeSimpleResult(raw);
-        if(!summary){ setError(out?.message || 'No hubo datos suficientes para simular. Prueba con otro mercado.'); return; }
-        // Señales de hoy con los precios semanales ya descargados (sin otra descarga).
-        const tickers = window.StockScannerConfig.UNIVERSE_PRESETS[market.preset]?.tickers || [];
-        const today = C.todaySimpleSignals({ dataByTicker: cacheRef.current, tickers, strategy });
-        const signals = today.list, signalsTotal = today.total;
-        setOutcome({ summary, signals, signalsTotal, market, strategy, period });
-        const game = { id: Date.now(), market: market.name, flag: market.flag, strategy: strategy.name, icon: strategy.icon, period: period.label, ret: summary.ret, benchRet: summary.benchRet, stars: summary.stars, currency: market.currency };
-        setGames(prev => { const next = [game, ...prev].slice(0, 30); saveGames(next); return next; });
-        setTimeout(() => resultRef.current?.scrollIntoView?.({ behavior: 'smooth', block: 'start' }), 60);
+        const backtest = summary ? { summary, annReturn: raw.annReturn, sharpe: raw.sharpe, commissions: raw.totalCommissionPaid } : null;
+        setRun(r => ({ ...r, backtest, backtestError: backtest ? null : (out?.message || 'No hubo datos suficientes para el backtest.') }));
+        if(summary){
+          const game = { id: Date.now(), market: market.name, flag: market.flag, strategy: strategy.name, icon: strategy.icon, period: period.label, ret: summary.ret, benchRet: summary.benchRet, stars: summary.stars };
+          setGames(prev => { const next = [game, ...prev].slice(0, 30); saveGames(next); return next; });
+        }
+        setStage('done');
       }catch(e){
-        if(e?.name === 'AbortError') setError('Simulación cancelada.');
-        else setError(e?.message || 'Algo salió mal. Inténtalo de nuevo.');
-      }finally{
-        setRunning(false); setProgress(null); abortRef.current = null;
-      }
+        setStage('idle');
+        setError(e?.name === 'AbortError' ? 'Análisis cancelado.' : (e?.message || 'Algo salió mal. Inténtalo de nuevo.'));
+      }finally{ abortRef.current = null; setProgress(''); }
     };
 
-    const tryAnother = () => { setOutcome(null); setStrategyId(null); setTimeout(() => strategyRef.current?.scrollIntoView?.({ behavior: 'smooth', block: 'start' }), 30); };
+    const stageState = id => {
+      const order = STAGES.map(s => s.id), cur = order.indexOf(stage);
+      if(stage === 'done') return 'done';
+      if(stage === 'idle') return run && order.indexOf(id) < order.length ? (run[id] ? 'done' : 'todo') : 'todo';
+      return order.indexOf(id) < cur ? 'done' : order.indexOf(id) === cur ? 'active' : 'todo';
+    };
     const ranking = [...games].sort((a, b) => b.ret - a.ret).slice(0, 8);
     const medal = i => ['🥇', '🥈', '🥉'][i] || `${i + 1}.`;
-    const s = outcome?.summary, cur = outcome?.market.currency;
+    const cur = run?.market?.currency;
+    const scan = run?.scan, pf = run?.portfolio, bt = run?.backtest;
+    const inPortfolio = new Set((pf?.allocations || []).map(a => a.ticker));
+    const fmtCol = (v, fmt) => fmt === 'pct' ? pct(v) : fmt === 'num' ? num(v, 1) : (v ?? '—');
 
     return (
       <div className="simple-mode">
         <section className="simple-hero">
-          <h1>🎮 Simulador de estrategias</h1>
-          <p>Elige un mercado y una estrategia y descubre qué habría pasado con <b>10.000</b> invertidos. ¿Le ganarás al mercado?</p>
+          <h1>Radar Onix · Simulador de inversión</h1>
+          <p>Del escáner al portafolio: elige un mercado y una estrategia y sigue el proceso completo con datos reales.</p>
         </section>
 
-        <section className="simple-step" aria-labelledby="simple-step-1">
-          <h2 id="simple-step-1"><span className="simple-step-n">1</span>Elige tu mercado</h2>
-          <div className="simple-grid simple-grid-markets">
-            {markets.map(m => (
-              <button type="button" key={m.id} className="simple-card" aria-pressed={m.id === marketId} onClick={() => setMarketId(m.id)} disabled={running}>
-                <span className="simple-card-icon">{m.flag}</span>
-                <strong>{m.name}</strong>
-                <span>{m.blurb}</span>
-              </button>
-            ))}
-          </div>
-        </section>
-
-        <section className="simple-step" aria-labelledby="simple-step-2" ref={strategyRef}>
-          <h2 id="simple-step-2"><span className="simple-step-n">2</span>Elige tu estrategia</h2>
-          <div className="simple-grid simple-grid-3">
-            {strategies.map(st => (
-              <button type="button" key={st.id} className="simple-card simple-card-strategy" aria-pressed={st.id === strategyId} onClick={() => setStrategyId(st.id)} disabled={running}>
-                <span className="simple-card-icon">{st.icon}</span>
-                <strong>{st.name}</strong>
-                <span>{st.pitch}</span>
-                <em className="simple-badge">{st.level}</em>
-              </button>
-            ))}
-          </div>
-        </section>
-
-        <section className="simple-step" aria-labelledby="simple-step-3">
-          <h2 id="simple-step-3"><span className="simple-step-n">3</span>¡A simular!</h2>
+        <div className="simple-setup">
+          <section className="simple-step" aria-labelledby="simple-step-market">
+            <h2 id="simple-step-market"><span className="simple-step-n">A</span>Mercado</h2>
+            <div className="simple-grid simple-grid-markets">
+              {markets.map(m => (
+                <button type="button" key={m.id} className="simple-card compact" aria-pressed={m.id === marketId} onClick={() => setMarketId(m.id)} disabled={running}>
+                  <span className="simple-card-icon">{m.flag}</span><strong>{m.name}</strong><span>{m.blurb}</span>
+                </button>
+              ))}
+            </div>
+          </section>
+          <section className="simple-step" aria-labelledby="simple-step-strategy">
+            <h2 id="simple-step-strategy"><span className="simple-step-n">B</span>Estrategia</h2>
+            <div className="simple-grid simple-grid-3">
+              {strategies.map(st => (
+                <button type="button" key={st.id} className="simple-card simple-card-strategy" aria-pressed={st.id === strategyId} onClick={() => setStrategyId(st.id)} disabled={running}>
+                  <span className="simple-card-icon">{st.icon}</span><strong>{st.name}</strong><span>{st.pitch}</span>
+                  <span className="simple-rule"><b>Compra:</b> {st.buy}</span>
+                  <span className="simple-rule"><b>Vende:</b> {st.sell}</span>
+                  <em className="simple-badge">{st.level}</em>
+                </button>
+              ))}
+            </div>
+          </section>
           <div className="simple-launch">
-            <div className="simple-periods" role="group" aria-label="Periodo">
-              <span>Periodo:</span>
+            <div className="simple-periods" role="group" aria-label="Periodo del backtest">
+              <span>Backtest:</span>
               {periods.map(p => <button type="button" key={p.years} aria-pressed={p.years === years} onClick={() => setYears(p.years)} disabled={running}>{p.label}</button>)}
             </div>
-            {!running && <button type="button" className="simple-play" onClick={simulate} disabled={!ready}>
-              {strategy ? `▶  Simular con 10.000 ${market.currency}` : 'Elige una estrategia para empezar'}
+            {!running && <button type="button" className="simple-play" onClick={execute} disabled={!ready}>
+              {strategy ? '▶  Ejecutar análisis' : 'Elige una estrategia para empezar'}
             </button>}
-            {running && <div className="simple-progress" role="status" aria-live="polite">
-              <div className="simple-progress-bar"><span style={{ width: (progress?.pct || 2) + '%' }}/></div>
-              <div className="simple-progress-label">{progress?.label || 'Preparando'}… {progress?.pct ? Math.round(progress.pct) + ' %' : ''}</div>
-              <button type="button" className="simple-link" onClick={() => abortRef.current?.abort()}>Cancelar</button>
-            </div>}
+            {running && <button type="button" className="simple-link" onClick={() => abortRef.current?.abort()}>Cancelar</button>}
           </div>
           {error && <div className="simple-error" role="alert">{error}</div>}
-        </section>
+        </div>
 
-        {s && <section className="simple-result" ref={resultRef} aria-label="Resultado de la simulación">
-          <div className="simple-result-head">
-            <div>
-              <div className="simple-result-title">{s.headline}</div>
-              <div className="simple-result-sub">{`${outcome.strategy.icon} ${outcome.strategy.name} · ${outcome.market.flag} ${outcome.market.name} · desde ${monthYear(s.start)}`}</div>
+        {run && <div ref={sectionRef}>
+          <ol className="simple-pipeline" aria-label="Progreso del análisis">
+            {STAGES.map((s, i) => { const st = stageState(s.id); return (
+              <li key={s.id} data-state={st}>
+                <span className="dot">{st === 'done' ? '✓' : i + 1}</span>
+                <span><b>{s.label}</b>{st === 'active' && <small role="status">{progress || 'Trabajando…'}</small>}</span>
+              </li>); })}
+          </ol>
+
+          {scan && <section className="simple-panel" aria-label="Escáner">
+            <header><span className="simple-panel-n">1</span><div>
+              <h2>Escáner · ¿qué acciones cumplen hoy la estrategia?</h2>
+              <p>Se revisan todas las acciones del mercado con la última vela semanal cerrada y se quedan las que cumplen las reglas de compra.</p>
+            </div></header>
+            <div className="simple-kpis">
+              <div><span>Acciones analizadas</span><strong>{scan.analyzed}</strong></div>
+              <div><span>Cumplen la estrategia</span><strong>{scan.passing.length}</strong></div>
+              <div><span>Del mercado</span><strong>{scan.analyzed ? pct(scan.passing.length / scan.analyzed, 0, false) : '—'}</strong></div>
             </div>
-            <Stars n={s.stars}/>
-          </div>
-          <div className="simple-scores">
-            <div className="simple-score main">
-              <span>Tu estrategia</span>
-              <strong>{money(s.final, cur)}</strong>
-              <em className={s.ret >= 0 ? 'up' : 'down'}>{pct(s.ret)}</em>
+            {scan.passing.length ? <div className="simple-table-wrap"><table className="simple-table">
+              <thead><tr><th>#</th><th>Acción</th><th>Precio</th><th>Última semana</th>
+                {run.strategy.columns.map(col => <th key={col.label} title={col.hint}>{col.label}</th>)}
+                <th title="Rentabilidad por unidad de riesgo en el último año">Sharpe 1 año</th><th/></tr></thead>
+              <tbody>{scan.passing.slice(0, 12).map((r, i) => (
+                <tr key={r.ticker}>
+                  <td>{i + 1}</td><td><b>{r.ticker}</b></td><td>{num(r.price)}</td>
+                  <td className={r.chg >= 0 ? 'up' : 'down'}>{pct(r.chg)}</td>
+                  {r.values.map((v, k) => <td key={k}>{fmtCol(v, run.strategy.columns[k].fmt)}</td>)}
+                  <td>{num(r.sharpe1y)}</td>
+                  <td>{inPortfolio.has(r.ticker) && <span className="simple-tag">En cartera</span>}</td>
+                </tr>))}</tbody>
+            </table>{scan.passing.length > 12 && <p className="simple-note">{`Y ${scan.passing.length - 12} acciones más. Las ${Math.min(scan.passing.length, C.SIMPLE_CANDIDATES)} con mejor Sharpe del último año pasan al optimizador.`}</p>}</div>
+              : <p className="simple-note">Hoy ninguna acción del mercado cumple las reglas: la estrategia esperaría.</p>}
+          </section>}
+
+          {run.portfolioError && <section className="simple-panel" aria-label="Portafolio"><header><span className="simple-panel-n">2</span><div><h2>Portafolio de Markowitz</h2><p>{run.portfolioError}</p></div></header></section>}
+          {pf && <section className="simple-panel" aria-label="Portafolio de Markowitz">
+            <header><span className="simple-panel-n">2</span><div>
+              <h2>Portafolio de Markowitz · ¿cuánto invertir en cada acción?</h2>
+              <p>El optimizador prueba miles de combinaciones de pesos con las rentabilidades y correlaciones históricas y elige la de máximo Sharpe: la mejor rentabilidad por unidad de riesgo. Máximo 10 acciones y 25 % por acción.</p>
+            </div></header>
+            <div className="simple-kpis">
+              <div><span>Rentabilidad esperada</span><strong>{pct(pf.chosenPoint.ret / 100)}</strong><small>anual, histórica</small></div>
+              <div><span>Volatilidad (riesgo)</span><strong>{pct(pf.chosenPoint.vol / 100, 1, false)}</strong><small>anual</small></div>
+              <div><span>Ratio de Sharpe</span><strong>{num((pf.chosenPoint.ret - 3) / pf.chosenPoint.vol)}</strong><small>tasa libre de riesgo 3 %</small></div>
+              <div><span>Acciones</span><strong>{pf.allocations.length}</strong><small>{`de ${Math.min(scan?.passing.length || 0, C.SIMPLE_CANDIDATES)} candidatas`}</small></div>
             </div>
-            <div className="simple-vs">VS</div>
-            <div className="simple-score">
-              <span>{`Comprar el ${outcome.market.name} y esperar`}</span>
-              <strong>{money(s.benchFinal, cur)}</strong>
-              <em className={(s.benchRet || 0) >= 0 ? 'up' : 'down'}>{pct(s.benchRet)}</em>
+            <div className="simple-portfolio-grid">
+              <FrontierChart portfolio={pf}/>
+              <div>
+                <h3>Peso por acción</h3>
+                <Bars items={pf.allocations.map(a => ({ key: a.ticker, label: a.ticker, sub: a.shortName && a.shortName !== a.ticker ? a.shortName : sectorEs(a.sector), weight: Math.abs(a.weight), extra: money(Math.abs(a.weight) * 10000, cur) }))}/>
+                <h3>Peso por sector</h3>
+                <Bars color="var(--green)" items={(pf.sectors || []).map(s => ({ key: s.name, label: sectorEs(s.name), sub: `${s.count} acción${s.count > 1 ? 'es' : ''}`, weight: s.weight }))}/>
+              </div>
             </div>
-          </div>
-          <SimpleChart summary={s} currency={cur} marketName={outcome.market.name}/>
-          <div className="simple-facts">
-            <div><span>Operaciones</span><strong>{s.trades}</strong></div>
-            <div><span>Operaciones ganadoras</span><strong>{s.winRate != null ? Math.round(s.winRate * 100) + ' %' : '—'}</strong></div>
-            <div><span>Peor caída</span><strong>{pct(-s.dd)}</strong><small>{s.benchDd != null ? `mercado ${pct(-s.benchDd)}` : ''}</small></div>
-          </div>
-          <div className="simple-stars-help">
-            <span>⭐ ganar dinero</span><span>⭐ ganar al mercado</span><span>⭐ sufrir menos caída que el mercado</span>
-          </div>
+          </section>}
 
-          <div className="simple-signals">
-            <h3>{`📡 Hoy esta estrategia elegiría (${outcome.signalsTotal})`}</h3>
-            {outcome.signals.length
-              ? <div className="simple-chips">{outcome.signals.map(x => <span key={x.ticker} className="simple-chip"><b>{x.ticker}</b>{Number.isFinite(x.price) ? ` ${x.price.toFixed(2)}` : ''}</span>)}{outcome.signalsTotal > outcome.signals.length && <span className="simple-chip">{`y ${outcome.signalsTotal - outcome.signals.length} más`}</span>}</div>
-              : <p>Hoy ninguna acción de este mercado cumple las condiciones: la estrategia esperaría.</p>}
-          </div>
-
-          <button type="button" className="simple-link" aria-expanded={howOpen} onClick={() => setHowOpen(v => !v)}>{howOpen ? 'Ocultar cómo decide' : '¿Cómo decide esta estrategia?'}</button>
-          {howOpen && <div className="simple-how">
-            <p><b>Compra cuando:</b> {outcome.strategy.buy}</p>
-            <p><b>Vende cuando:</b> {outcome.strategy.sell}</p>
-            <p>Revisa el mercado cada semana, reparte el dinero entre hasta 10 acciones a la vez y descuenta comisiones.</p>
-          </div>}
-
-          <div className="simple-actions">
-            <button type="button" className="simple-play small" onClick={tryAnother}>🔁 Probar otra estrategia</button>
-          </div>
-        </section>}
+          {run.backtestError && <section className="simple-panel" aria-label="Backtest"><header><span className="simple-panel-n">3</span><div><h2>Backtest</h2><p>{run.backtestError}</p></div></header></section>}
+          {bt && <section className="simple-panel simple-result" aria-label="Resultado del backtest">
+            <header><span className="simple-panel-n">3</span><div>
+              <h2>Backtest · ¿habría funcionado en el pasado?</h2>
+              <p>{`La estrategia se aplica semana a semana desde ${monthYear(bt.summary.start)} con 10.000 ${cur}: compra cuando se cumplen las reglas, vende cuando se cumplen las de salida, reparte el dinero según rentabilidad/riesgo y descuenta comisiones.`}</p>
+            </div></header>
+            <div className="simple-result-head">
+              <div className="simple-result-title">{bt.summary.headline}</div>
+              <Stars n={bt.summary.stars}/>
+            </div>
+            <div className="simple-scores">
+              <div className="simple-score main"><span>Estrategia</span><strong>{money(bt.summary.final, cur)}</strong><em className={bt.summary.ret >= 0 ? 'up' : 'down'}>{pct(bt.summary.ret)}</em></div>
+              <div className="simple-vs">VS</div>
+              <div className="simple-score"><span>{`Comprar el ${run.market.name} y esperar`}</span><strong>{money(bt.summary.benchFinal, cur)}</strong><em className={(bt.summary.benchRet || 0) >= 0 ? 'up' : 'down'}>{pct(bt.summary.benchRet)}</em></div>
+            </div>
+            <SimpleChart summary={bt.summary} currency={cur} marketName={run.market.name}/>
+            <div className="simple-facts simple-facts-6">
+              <div><span>Rentabilidad anual</span><strong>{pct(bt.annReturn)}</strong></div>
+              <div><span>Ratio de Sharpe</span><strong>{num(bt.sharpe)}</strong></div>
+              <div><span>Máxima caída</span><strong>{pct(-bt.summary.dd)}</strong><small>{bt.summary.benchDd != null ? `índice ${pct(-bt.summary.benchDd)}` : ''}</small></div>
+              <div><span>Operaciones</span><strong>{bt.summary.trades}</strong></div>
+              <div><span>Operaciones ganadoras</span><strong>{bt.summary.winRate != null ? Math.round(bt.summary.winRate * 100) + ' %' : '—'}</strong></div>
+              <div><span>Comisiones pagadas</span><strong>{money(bt.commissions, cur)}</strong></div>
+            </div>
+            <div className="simple-stars-help"><span>⭐ ganar dinero</span><span>⭐ ganar al mercado</span><span>⭐ caer menos que el mercado</span></div>
+          </section>}
+        </div>}
 
         {ranking.length > 0 && <section className="simple-ranking" aria-label="Tus partidas">
           <div className="simple-ranking-head">
@@ -220,22 +326,17 @@ window.StockScannerUI = window.StockScannerUI || {};
             <button type="button" className="simple-link" onClick={() => { setGames([]); saveGames([]); }}>Borrar</button>
           </div>
           <table>
-            <thead><tr><th/><th>Estrategia</th><th>Mercado</th><th>Periodo</th><th>Resultado</th><th>Mercado</th><th>Estrellas</th></tr></thead>
+            <thead><tr><th/><th>Estrategia</th><th>Mercado</th><th>Periodo</th><th>Resultado</th><th>Índice</th><th>Estrellas</th></tr></thead>
             <tbody>{ranking.map((g, i) => (
               <tr key={g.id}>
-                <td>{medal(i)}</td>
-                <td>{`${g.icon} ${g.strategy}`}</td>
-                <td>{`${g.flag} ${g.market}`}</td>
-                <td>{g.period}</td>
-                <td className={g.ret >= 0 ? 'up' : 'down'}>{pct(g.ret)}</td>
-                <td>{pct(g.benchRet)}</td>
-                <td><Stars n={g.stars} size={15}/></td>
+                <td>{medal(i)}</td><td>{`${g.icon} ${g.strategy}`}</td><td>{`${g.flag} ${g.market}`}</td><td>{g.period}</td>
+                <td className={g.ret >= 0 ? 'up' : 'down'}>{pct(g.ret)}</td><td>{pct(g.benchRet)}</td><td><Stars n={g.stars} size={15}/></td>
               </tr>
             ))}</tbody>
           </table>
         </section>}
 
-        <p className="simple-disclaimer">Simulación con precios históricos reales (Yahoo Finance). Rentabilidades pasadas no garantizan resultados futuros; no es una recomendación de inversión.</p>
+        <p className="simple-disclaimer">Datos reales de Yahoo Finance. Rentabilidades pasadas no garantizan resultados futuros; es una herramienta educativa, no una recomendación de inversión.</p>
       </div>
     );
   }
