@@ -162,14 +162,14 @@
   // añade además todas las acciones de EE. UU. del Nasdaq).
   const explicitUniverse = market => !!(market.tickers || market.exclude || market.heavy);
 
-  function buildSimpleBacktestOptions({ market, strategy, period }){
+  function buildSimpleBacktestOptions({ market, strategy, period, capital = CAPITAL }){
     return {
       entryRules: [{ _id: 'g1', conditions: withIds(strategy.entry) }],
       exitRules: strategy.exit.map((g, i) => ({ _id: 'x' + i, conditions: withIds(g) })),
       shortEntryRules: [], shortExitRules: [], btDirection: 'long',
       // Sin stops: evitan descargar velas de 4 horas y el resultado se explica sólo con las reglas.
       stopATR: false, stopATRMult: 2, stopPct: false, stopPctVal: 10,
-      btWeeks: period.weeks, btCapital: CAPITAL, pfMaxPos: 10, pfRiskFree: 3,
+      btWeeks: period.weeks, btCapital: capital, pfMaxPos: 10, pfRiskFree: 3,
       btBenchmark: market.benchmark, btCommission: 0.1, btSlippage: 0.05,
       // Reparte el capital según la relación rentabilidad/riesgo reciente de cada señal (máx. 25 % por acción).
       pfStopATRPeriod: 14, pfMinWeight: 2, pfMaxWeight: 25, pfMode: 'maxsharpe', btAllocationMode: 'maxsharpe',
@@ -310,11 +310,11 @@
   }
 
   const CANDIDATES = 40;
-  function buildSimplePortfolioOptions({ strategy, candidates, cacheRef, fetchSectors }){
+  function buildSimplePortfolioOptions({ strategy, candidates, cacheRef, fetchSectors, capital = CAPITAL }){
     return {
       results: candidates.slice(0, CANDIDATES).map(r => ({ ticker: r.ticker, name: r.ticker, passed: true, direction: 'LONG' })),
       filters: withIds(strategy.entry), shortFilters: [],
-      pfCapital: CAPITAL, pfMinWeight: 2, pfMaxWeight: 25, pfMaxPos: 10, pfRiskFree: 3,
+      pfCapital: capital, pfMinWeight: 2, pfMaxWeight: 25, pfMaxPos: 10, pfRiskFree: 3,
       pfCorFilter: true, pfCorThresh: 0.85, pfMode: 'maxsharpe', pfSims: 10000, pfSeed: 42,
       pfStopType: 'none', pfStopATRMult: 2, pfStopATRPeriod: 14, pfStopPctVal: 8,
       sectorData: {}, scanDirection: 'long', pfUniverseSource: 'scan', pfManualTickers: '',

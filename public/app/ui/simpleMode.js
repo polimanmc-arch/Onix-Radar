@@ -20,6 +20,31 @@ window.StockScannerUI = window.StockScannerUI || {};
   function loadGames(){ try{ const v = JSON.parse(localStorage.getItem(GAMES_KEY) || '[]'); return Array.isArray(v) ? v : []; }catch{ return []; } }
   function saveGames(list){ try{ localStorage.setItem(GAMES_KEY, JSON.stringify(list.slice(0, 30))); }catch{} }
 
+  // Partidas completas (escáner, Markowitz, backtest y velas de la tabla) en IndexedDB del navegador,
+  // para volver a verlas en cualquier momento sin descargar nada.
+  const SNAP_DB = 'onix_simple_snapshots', SNAP_STORE = 'games';
+  function snapTx(mode, fn){
+    return new Promise((resolve, reject) => {
+      if(typeof indexedDB === 'undefined'){ reject(new Error('Sin almacenamiento')); return; }
+      const open = indexedDB.open(SNAP_DB, 1);
+      open.onupgradeneeded = () => open.result.createObjectStore(SNAP_STORE);
+      open.onerror = () => reject(open.error);
+      open.onsuccess = () => {
+        const db = open.result;
+        try{
+          const tx = db.transaction(SNAP_STORE, mode); const req = fn(tx.objectStore(SNAP_STORE));
+          tx.oncomplete = () => { db.close(); resolve(req?.result); };
+          tx.onerror = tx.onabort = () => { db.close(); reject(tx.error); };
+        }catch(e){ db.close(); reject(e); }
+      };
+    });
+  }
+  const saveSnapshot = (id, snap) => snapTx('readwrite', st => st.put(snap, id));
+  const loadSnapshot = id => snapTx('readonly', st => st.get(id));
+  const clearSnapshots = () => snapTx('readwrite', st => st.clear());
+  const pruneSnapshots = keep => snapTx('readwrite', st => { const r = st.getAllKeys(); r.onsuccess = () => r.result.forEach(k => { if(!keep.includes(k)) st.delete(k); }); return r; });
+  const CAPITAL_OPTIONS = [1000, 10000, 100000, 1000000];
+
   function Stars({ n, size = 26 }){
     return <span className="simple-stars" aria-label={`${n} de 3 estrellas`} style={{ fontSize: size }}>
       {[0, 1, 2].map(i => <span key={i} aria-hidden="true" className={i < n ? 'on' : 'off'}>★</span>)}
@@ -40,7 +65,7 @@ window.StockScannerUI = window.StockScannerUI || {};
     const ticks = [summary.capital, ...[lo + rg * 0.1, hi - rg * 0.1].filter(v => Math.abs(v - summary.capital) > rg * 0.12)];
     return (
       <figure className="simple-chart">
-        <svg viewBox={`0 0 ${W} ${H}`} role="img" aria-label={`Evolución de 10.000 ${currency}: estrategia frente a comprar ${holdLabel}`}>
+        <svg viewBox={`0 0 ${W} ${H}`} role="img" aria-label={`Evolución de ${money(summary.capital, currency)}: estrategia frente a comprar ${holdLabel}`}>
           {ticks.map(v => <g key={v}>
             <line x1={padL} x2={W - padR} y1={y(v)} y2={y(v)} stroke="var(--border)" strokeDasharray={v === summary.capital ? '4 4' : '0'} strokeWidth="1"/>
             <text x={padL - 8} y={y(v) + 4} textAnchor="end" fontSize="11" fill="var(--text-2)">{Math.round(v).toLocaleString('es-ES')}</text>
@@ -177,29 +202,47 @@ window.StockScannerUI = window.StockScannerUI || {};
     );
   });
 
-  // Gráfico de dona con leyenda: reparto del dinero por acción o por sector.
+  // Gráfico de dona: reparto del dinero por acción o por sector. Cada color lleva su ticker o sector
+  // encima; al pasar el ratón (o tocar) el centro muestra el nombre, el % y el dinero.
   const DONUT_COLORS = ['#5b8cff', '#2ec4a6', '#f5a623', '#e8577c', '#9b6dff', '#3fb8e6', '#8bc34a', '#ff7a45', '#d4b106', '#c06fd6', '#4dd0a0', '#ef6461'];
-  const Donut = memo(function Donut({ items, title, center, currency }){
-    const R = 70, SW = 26, CIRC = 2 * Math.PI * R;
+  const cut = (t, n) => (t && t.length > n ? t.slice(0, n - 1) + '…' : t || '');
+  const Donut = memo(function Donut({ items, title, center, currency, capital = 10000 }){
+    const [hover, setHover] = useState(null);
+    const C0 = 160, R = 112, SW = 60, CIRC = 2 * Math.PI * R;
     const total = items.reduce((t, i) => t + i.weight, 0) || 1;
     let acc = 0;
     const slices = items.map((it, i) => { const frac = it.weight / total, sl = { ...it, frac, off: acc, color: it.color || DONUT_COLORS[i % DONUT_COLORS.length] }; acc += frac; return sl; });
+    const hs = hover != null ? slices.find(sl => sl.key === hover) : null;
     return (
-      <figure className="simple-donut">
-        <div className="simple-donut-body">
-          <svg viewBox="0 0 200 200" role="img" aria-label={`${title}: ` + slices.map(sl => `${sl.label} ${pct(sl.weight, 1, false)}`).join(', ')}>
-            <circle cx="100" cy="100" r={R} fill="none" stroke="var(--bg-3)" strokeWidth={SW}/>
-            {slices.map(sl => <circle key={sl.key} cx="100" cy="100" r={R} fill="none" stroke={sl.color} strokeWidth={SW}
-              strokeDasharray={`${Math.max(0, sl.frac * CIRC - (slices.length > 1 ? 1.5 : 0))} ${CIRC}`} strokeDashoffset={-sl.off * CIRC}
-              transform="rotate(-90 100 100)"><title>{`${sl.label}: ${pct(sl.weight, 1, false)}`}</title></circle>)}
-            <text x="100" y="98" textAnchor="middle" fontSize="30" fontWeight="800" fill="var(--text-0)">{center.value}</text>
-            <text x="100" y="120" textAnchor="middle" fontSize="13" fill="var(--text-2)">{center.label}</text>
-          </svg>
-          <ul className="simple-donut-legend">{slices.map(sl => (
-            <li key={sl.key}><i style={{ background: sl.color }}/><span><b>{sl.label}</b>{sl.sub && <small>{sl.sub}</small>}</span>
-              <strong>{pct(sl.weight, 1, false)}{currency && <small>{money(sl.weight * 10000, currency)}</small>}</strong></li>
-          ))}</ul>
-        </div>
+      <figure className="simple-donut big">
+        <svg viewBox="0 0 320 320" role="img" aria-label={`${title}: ` + slices.map(sl => `${sl.label} ${pct(sl.weight, 1, false)}`).join(', ')}
+          onMouseLeave={() => setHover(null)}>
+          <circle cx={C0} cy={C0} r={R} fill="none" stroke="var(--bg-3)" strokeWidth={SW}/>
+          {slices.map(sl => (
+            <circle key={sl.key} cx={C0} cy={C0} r={R} fill="none" stroke={sl.color} strokeWidth={hover === sl.key ? SW + 10 : SW}
+              strokeDasharray={`${Math.max(0, sl.frac * CIRC - (slices.length > 1 ? 2 : 0))} ${CIRC}`} strokeDashoffset={-sl.off * CIRC}
+              transform={`rotate(-90 ${C0} ${C0})`} opacity={hover != null && hover !== sl.key ? 0.45 : 1} className="simple-donut-slice"
+              tabIndex={0} onMouseEnter={() => setHover(sl.key)} onFocus={() => setHover(sl.key)} onBlur={() => setHover(null)}
+              onClick={() => setHover(h => h === sl.key ? null : sl.key)}>
+              <title>{`${sl.label}${sl.sub ? ' · ' + sl.sub : ''}: ${pct(sl.weight, 1, false)}${currency ? ' · ' + money(sl.weight * capital, currency) : ''}`}</title>
+            </circle>))}
+          {slices.filter(sl => sl.frac >= 0.035).map(sl => {
+            const a = (sl.off + sl.frac / 2) * 2 * Math.PI - Math.PI / 2;
+            const fs = sl.frac >= 0.15 ? 15 : sl.frac >= 0.07 ? 13 : 11;
+            return <text key={sl.key} x={C0 + R * Math.cos(a)} y={C0 + R * Math.sin(a)} textAnchor="middle" dominantBaseline="central"
+              fontSize={fs} fontWeight="800" className="simple-donut-tag" aria-hidden="true">{cut(sl.label, sl.frac >= 0.12 ? 14 : 9)}</text>;
+          })}
+          {hs ? <g aria-hidden="true">
+            <text x={C0} y={C0 - 30} textAnchor="middle" fontSize="20" fontWeight="800" fill="var(--text-0)">{cut(hs.label, 16)}</text>
+            {hs.sub && <text x={C0} y={C0 - 10} textAnchor="middle" fontSize="11.5" fill="var(--text-2)">{cut(hs.sub, 26)}</text>}
+            <text x={C0} y={C0 + 18} textAnchor="middle" fontSize="24" fontWeight="800" fill={hs.color}>{pct(hs.weight, 1, false)}</text>
+            {currency && <text x={C0} y={C0 + 40} textAnchor="middle" fontSize="14" fill="var(--text-1)">{money(hs.weight * capital, currency)}</text>}
+          </g> : <g aria-hidden="true">
+            <text x={C0} y={C0 + 2} textAnchor="middle" fontSize="40" fontWeight="800" fill="var(--text-0)">{center.value}</text>
+            <text x={C0} y={C0 + 26} textAnchor="middle" fontSize="14" fill="var(--text-2)">{center.label}</text>
+            <text x={C0} y={C0 + 46} textAnchor="middle" fontSize="11" fill="var(--text-3)">pasa el ratón por un color</text>
+          </g>}
+        </svg>
       </figure>
     );
   });
@@ -223,6 +266,8 @@ window.StockScannerUI = window.StockScannerUI || {};
     const [run, setRun] = useState(null);
     const [error, setError] = useState(null);
     const [games, setGames] = useState(loadGames);
+    const [capital, setCapital] = useState(10000); // dinero a invertir (paso 4), también el del backtest
+    const [rankMsg, setRankMsg] = useState(null);
     const cacheRef = useRef({});
     const abortRef = useRef(null);
     useEffect(() => () => abortRef.current?.abort(), []);
@@ -248,7 +293,9 @@ window.StockScannerUI = window.StockScannerUI || {};
     const running = stage !== 'idle';
     const ready = market && strategy && !running;
     // Si cambian mercado, estrategia o filtro, los resultados anteriores ya no corresponden.
-    useEffect(() => { if(!abortRef.current) { setRun(null); setError(null); } }, [marketId, strategyId, mktFilter]);
+    useEffect(() => {
+      if(run && !abortRef.current && (run.market?.id !== marketId || run.strategy?.id !== strategyId || !!run.mktOn !== mktOnOf(baseStrategy))){ setRun(null); setError(null); }
+    }, [marketId, strategyId, mktFilter]);
 
     const n = x => Number(x).toLocaleString('es-ES');
     const scrollSoon = id => setTimeout(() => { if(typeof document !== 'undefined') document.getElementById(id)?.scrollIntoView?.({ behavior: 'smooth', block: 'start' }); }, 80);
@@ -265,7 +312,7 @@ window.StockScannerUI = window.StockScannerUI || {};
     // Paso 3: escáner
     const runScan = () => {
       if(!ready) return undefined;
-      const cfg = { market, strategy, tag: tagOf(baseStrategy) };
+      const cfg = { market, strategy, tag: tagOf(baseStrategy), mktOn: mktOnOf(baseStrategy) };
       setRun({ ...cfg }); setSelTicker(null);
       return runStep('scan', async ac => {
         setProgress('Preparando la descarga de precios');
@@ -285,22 +332,23 @@ window.StockScannerUI = window.StockScannerUI || {};
     const runPortfolio = () => {
       if(!run?.scan || running) return undefined;
       const { strategy: st, scan: sc } = run;
+      const cap = capital;
       return runStep('portfolio', async () => {
         setProgress('Probando 10.000 combinaciones de pesos');
         let portfolio = null, portfolioError = null;
         if(sc.passing.length >= 2){
           const fetchSectors = async list => { try{ const r = await fetch('/api/sectors?symbols=' + encodeURIComponent(list.join(','))); return r.ok ? r.json() : {}; }catch{ return {}; } };
-          const out = await C.buildPortfolioWorkflow({ ...C.buildSimplePortfolioOptions({ strategy: st, candidates: sc.passing, cacheRef, fetchSectors }), setPortfolio: p => { portfolio = p; } });
+          const out = await C.buildPortfolioWorkflow({ ...C.buildSimplePortfolioOptions({ strategy: st, candidates: sc.passing, cacheRef, fetchSectors, capital: cap }), setPortfolio: p => { portfolio = p; } });
           if(!out?.ok) portfolioError = out?.message || 'No se pudo construir el portafolio.';
         }else portfolioError = 'Hoy no hay suficientes acciones que cumplan la estrategia para construir un portafolio (hacen falta al menos 2).';
-        setRun(r => ({ ...r, portfolio, portfolioError }));
+        setRun(r => ({ ...r, capital: cap, portfolio, portfolioError }));
       });
     };
 
     // Paso 5: backtest de la estrategia
     const runBacktest = () => {
       if(!run?.scan || running) return undefined;
-      const cfg = { market: run.market, strategy: run.strategy, period };
+      const cfg = { market: run.market, strategy: run.strategy, period, capital: run.capital || capital };
       return runStep('backtest', async ac => {
         setProgress('Preparando el backtest');
         let raw = null;
@@ -312,18 +360,46 @@ window.StockScannerUI = window.StockScannerUI || {};
             else if(p?.stage === 'data' && p.total > 1){ setProgress(`Preparando los datos ${n(p.done)} de ${n(p.total)}`); setProgressPct(p.done / p.total * 100); }
           },
         });
-        const summary = raw && C.summarizeSimpleResult(raw);
+        const summary = raw && C.summarizeSimpleResult(raw, { capital: cfg.capital });
         const backtest = summary ? { summary, annReturn: raw.annReturn, sharpe: raw.sharpe, commissions: raw.totalCommissionPaid } : null;
         setRun(r => ({ ...r, period, backtest, backtestError: backtest ? null : (out?.message || 'No hubo datos suficientes para el backtest.') }));
         if(summary){
-          const game = { id: Date.now(), market: cfg.market.name, flag: cfg.market.icon, strategy: cfg.strategy.name + (run.tag || ''), icon: cfg.strategy.icon, period: period.label, ret: summary.ret, benchRet: summary.benchRet, stars: summary.stars };
-          setGames(prev => { const next = [game, ...prev].slice(0, 30); saveGames(next); return next; });
+          const game = { id: Date.now(), market: cfg.market.name, flag: cfg.market.icon, strategy: cfg.strategy.name + (run.tag || ''), icon: cfg.strategy.icon, period: period.label, capital: cfg.capital, ret: summary.ret, benchRet: summary.benchRet, stars: summary.stars, saved: false };
+          // Foto completa de la partida: resultados + velas de las acciones de la tabla.
+          try{
+            const prices = {};
+            run.scan.passing.slice(0, 12).forEach(r => { const d = cacheRef.current[r.ticker]?.['1wk'];
+              if(d?.ok) prices[r.ticker] = { ticker: r.ticker, tf: '1wk', ok: true, opens: d.opens, highs: d.highs, lows: d.lows, closes: d.closes, volumes: d.volumes, times: d.times, price: d.price, prevClose: d.prevClose }; });
+            const pfSnap = run.portfolio ? { ...run.portfolio, correlationMatrix: null, equityCurve: null,
+              frontier: (run.portfolio.frontier || []).filter((_, i, a) => i % Math.max(1, Math.ceil(a.length / 900)) === 0) } : null;
+            const snap = JSON.parse(JSON.stringify({ v: 1, savedAt: game.id, marketId: cfg.market.id, strategyId: cfg.strategy.id, mktOn: !!run.mktOn, tag: run.tag || '',
+              period, capital: cfg.capital, scan: run.scan, portfolio: pfSnap, portfolioError: run.portfolioError || null, backtest, prices }));
+            await saveSnapshot(game.id, snap); game.saved = true;
+          }catch(e){ console.warn('Onix modo simple: no se pudo guardar la partida completa', e); }
+          setGames(prev => { const next = [game, ...prev].slice(0, 30); saveGames(next); pruneSnapshots(next.map(g => g.id)).catch(() => {}); return next; });
+          setRun(r => ({ ...r, gameId: game.id }));
         }
       });
     };
 
+    const openGame = async g => {
+      if(running) return;
+      let snap = null;
+      try{ snap = await loadSnapshot(g.id); }catch{}
+      const mk = snap && markets.find(m => m.id === snap.marketId), base = snap && strategies.find(x => x.id === snap.strategyId);
+      if(!snap || !mk || !base){ setRankMsg('Esta partida no tiene los detalles guardados (es anterior a esta opción o se borraron los datos del navegador).'); return; }
+      setRankMsg(null); setError(null); setSelTicker(null);
+      setMarketId(mk.id); setStrategyId(base.id); setMktFilter(m => ({ ...m, [base.id]: snap.mktOn }));
+      if(snap.period?.years) setYears(snap.period.years);
+      if(snap.capital) setCapital(snap.capital);
+      setRun({ market: mk, strategy: C.simpleWithMarketFilter(base, snap.mktOn), tag: snap.tag, mktOn: snap.mktOn, period: snap.period, capital: snap.capital,
+        scan: snap.scan, portfolio: snap.portfolio, portfolioError: snap.portfolioError, backtest: snap.backtest, backtestError: null,
+        prices: snap.prices, savedAt: snap.savedAt, gameId: g.id });
+      scrollSoon('simple-panel-scan');
+    };
+
     const stageState = id => run?.[id + 'Error'] ? 'error' : run?.[id] ? 'done' : stage === id ? 'active' : 'todo';
-    const ranking = [...games].sort((a, b) => b.ret - a.ret).slice(0, 8);
+    const ranking = [...games].sort((a, b) => b.ret - a.ret).slice(0, 10);
     const medal = i => ['🥇', '🥈', '🥉'][i] || `${i + 1}.`;
     const cur = run?.market?.currency;
     const scan = run?.scan, pf = run?.portfolio, bt = run?.backtest;
@@ -433,6 +509,12 @@ window.StockScannerUI = window.StockScannerUI || {};
         </div>
 
         {run && <div>
+          {run.savedAt && <div className="simple-saved" role="status">
+            <span aria-hidden="true">📂</span>
+            <div><b>{`Partida guardada · ${new Date(run.savedAt).toLocaleString('es-ES', { day: 'numeric', month: 'long', year: 'numeric', hour: '2-digit', minute: '2-digit' })}`}</b>
+              <small>Resultados y precios de ese día. Pulsa «Volver a escanear» para repetirla con datos de hoy.</small></div>
+            <button type="button" className="simple-link" onClick={() => setRun(null)}>Cerrar</button>
+          </div>}
           {scan && <section id="simple-panel-scan" className="simple-panel" aria-label="Escáner">
             <header><span className={'simple-panel-n' + (done('scan') ? ' done' : '')}>3</span><div>
               <h2>Escáner</h2>
@@ -465,13 +547,19 @@ window.StockScannerUI = window.StockScannerUI || {};
                   </tr>))}</tbody>
               </table>
               <p className="simple-note">{`Haz clic en una fila para ver su gráfico.${scan.passing.length > 12 ? ` Y ${scan.passing.length - 12} acciones más.` : ''} Las ${Math.min(scan.passing.length, C.SIMPLE_CANDIDATES)} con mejor Sharpe del último año pasan al optimizador.`}</p></div>
-              {selected && <SimpleCandles ticker={selected} data={cacheRef.current[selected]?.['1wk']} strategy={run.strategy} currency={cur}
+              {selected && <SimpleCandles ticker={selected} data={run.prices ? run.prices[selected] : cacheRef.current[selected]?.['1wk']} strategy={run.strategy} currency={cur}
                 row={scan.passing.find(r => r.ticker === selected)}/>}
             </div>
               : <p className="simple-note">Hoy ninguna acción del mercado cumple las reglas: la estrategia esperaría.</p>}
           </section>}
           {scan && !pf && !run.portfolioError && !running && <div className="simple-next">
             <p><b>Siguiente:</b> con las mejores acciones del escáner, Markowitz busca el reparto del dinero con la mejor rentabilidad por unidad de riesgo.</p>
+            <div className="simple-periods simple-capital" role="group" aria-label="Dinero a invertir">
+              <span>Dinero:</span>
+              {CAPITAL_OPTIONS.map(v => <button type="button" key={v} aria-pressed={capital === v} onClick={() => setCapital(v)}>{v.toLocaleString('es-ES')}</button>)}
+              <label><input type="number" min="100" step="100" inputMode="numeric" aria-label={`Otra cantidad en ${cur}`} value={capital}
+                onChange={e => { const v = Math.round(Number(e.target.value)); if(Number.isFinite(v) && v > 0) setCapital(v); }}/>{cur}</label>
+            </div>
             <button type="button" className="simple-play" onClick={runPortfolio}>▶  Paso 4 · Construir el portafolio</button>
           </div>}
 
@@ -498,8 +586,8 @@ window.StockScannerUI = window.StockScannerUI || {};
                   </div>
                 </div>
                 {weightView === 'stock'
-                  ? <Donut key="stock" title="Peso por acción" currency={cur} center={stockCenter} items={stockItems}/>
-                  : <Donut key="sector" title="Peso por sector" currency={cur} center={sectorCenter} items={sectorItems}/>}
+                  ? <Donut key="stock" title="Peso por acción" currency={cur} capital={run.capital || 10000} center={stockCenter} items={stockItems}/>
+                  : <Donut key="sector" title="Peso por sector" currency={cur} capital={run.capital || 10000} center={sectorCenter} items={sectorItems}/>}
               </div>
             </div>
           </section>}
@@ -516,7 +604,7 @@ window.StockScannerUI = window.StockScannerUI || {};
           {bt && <section id="simple-panel-backtest" className="simple-panel simple-result" aria-label="Resultado del backtest">
             <header><span className={'simple-panel-n' + (done('backtest') ? ' done' : '')}>5</span><div>
               <h2>Backtest · ¿habría funcionado en el pasado?</h2>
-              <p>{`${run.period?.label ? 'Periodo: ' + run.period.label + '. ' : ''}La estrategia se aplica semana a semana desde ${monthYear(bt.summary.start)} con 10.000 ${cur}: compra cuando se cumplen las reglas, vende cuando se cumplen las de salida, reparte el dinero según rentabilidad/riesgo y descuenta comisiones.`}</p>
+              <p>{`${run.period?.label ? 'Periodo: ' + run.period.label + '. ' : ''}La estrategia se aplica semana a semana desde ${monthYear(bt.summary.start)} con ${money(bt.summary.capital, cur)}: compra cuando se cumplen las reglas, vende cuando se cumplen las de salida, reparte el dinero según rentabilidad/riesgo y descuenta comisiones.`}</p>
             </div></header>
             <div className="simple-result-head">
               <div className="simple-result-title">{bt.summary.headline}</div>
@@ -557,17 +645,21 @@ window.StockScannerUI = window.StockScannerUI || {};
         {ranking.length > 0 && <section className="simple-ranking" aria-label="Tus partidas">
           <div className="simple-ranking-head">
             <h2>🏁 Tus partidas</h2>
-            <button type="button" className="simple-link" onClick={() => { setGames([]); saveGames([]); }}>Borrar</button>
+            <button type="button" className="simple-link" onClick={() => { setGames([]); saveGames([]); clearSnapshots().catch(() => {}); setRankMsg(null); }}>Borrar</button>
           </div>
           <table>
-            <thead><tr><th/><th>Estrategia</th><th>Mercado</th><th>Periodo</th><th>Resultado</th><th>Índice</th><th>Estrellas</th></tr></thead>
+            <thead><tr><th/><th>Estrategia</th><th>Mercado</th><th>Periodo</th><th>Resultado</th><th>Índice</th><th>Estrellas</th><th/></tr></thead>
             <tbody>{ranking.map((g, i) => (
-              <tr key={g.id}>
+              <tr key={g.id} className={run?.gameId === g.id ? 'sel' : ''}>
                 <td>{medal(i)}</td><td>{`${g.icon} ${g.strategy}`}</td><td>{`${g.flag} ${g.market}`}</td><td>{g.period}</td>
                 <td className={g.ret >= 0 ? 'up' : 'down'}>{pct(g.ret)}</td><td>{pct(g.benchRet)}</td><td><Stars n={g.stars} size={15}/></td>
+                <td>{g.saved
+                  ? <button type="button" className="simple-view" onClick={() => openGame(g)} disabled={running} aria-label={`Ver la partida ${g.strategy} en ${g.market}`}>Ver ▸</button>
+                  : <span className="simple-view-na" title="Partida anterior a esta opción: no se guardaron los detalles">—</span>}</td>
               </tr>
             ))}</tbody>
           </table>
+          {rankMsg && <p className="simple-note" role="status">{rankMsg}</p>}
         </section>}
 
         <p className="simple-disclaimer">Datos reales de Yahoo Finance. Rentabilidades pasadas no garantizan resultados futuros; es una herramienta educativa, no una recomendación de inversión.</p>

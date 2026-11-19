@@ -27,6 +27,39 @@ window.StockScannerUI = window.StockScannerUI || {};
         localStorage.setItem(GAMES_KEY, JSON.stringify(list.slice(0, 30)));
     }
     catch { } }
+    // Partidas completas (escáner, Markowitz, backtest y velas de la tabla) en IndexedDB del navegador,
+    // para volver a verlas en cualquier momento sin descargar nada.
+    const SNAP_DB = 'onix_simple_snapshots', SNAP_STORE = 'games';
+    function snapTx(mode, fn) {
+        return new Promise((resolve, reject) => {
+            if (typeof indexedDB === 'undefined') {
+                reject(new Error('Sin almacenamiento'));
+                return;
+            }
+            const open = indexedDB.open(SNAP_DB, 1);
+            open.onupgradeneeded = () => open.result.createObjectStore(SNAP_STORE);
+            open.onerror = () => reject(open.error);
+            open.onsuccess = () => {
+                const db = open.result;
+                try {
+                    const tx = db.transaction(SNAP_STORE, mode);
+                    const req = fn(tx.objectStore(SNAP_STORE));
+                    tx.oncomplete = () => { db.close(); resolve(req === null || req === void 0 ? void 0 : req.result); };
+                    tx.onerror = tx.onabort = () => { db.close(); reject(tx.error); };
+                }
+                catch (e) {
+                    db.close();
+                    reject(e);
+                }
+            };
+        });
+    }
+    const saveSnapshot = (id, snap) => snapTx('readwrite', st => st.put(snap, id));
+    const loadSnapshot = id => snapTx('readonly', st => st.get(id));
+    const clearSnapshots = () => snapTx('readwrite', st => st.clear());
+    const pruneSnapshots = keep => snapTx('readwrite', st => { const r = st.getAllKeys(); r.onsuccess = () => r.result.forEach(k => { if (!keep.includes(k))
+        st.delete(k); }); return r; });
+    const CAPITAL_OPTIONS = [1000, 10000, 100000, 1000000];
     function Stars({ n, size = 26 }) {
         return React.createElement("span", { className: "simple-stars", "aria-label": `${n} de 3 estrellas`, style: { fontSize: size } }, [0, 1, 2].map(i => React.createElement("span", { key: i, "aria-hidden": "true", className: i < n ? 'on' : 'off' }, "\u2605")));
     }
@@ -43,7 +76,7 @@ window.StockScannerUI = window.StockScannerUI || {};
         const area = path(a) + ` L${x(t1).toFixed(1)},${(H - padB).toFixed(1)} L${x(t0).toFixed(1)},${(H - padB).toFixed(1)} Z`;
         const ticks = [summary.capital, ...[lo + rg * 0.1, hi - rg * 0.1].filter(v => Math.abs(v - summary.capital) > rg * 0.12)];
         return (React.createElement("figure", { className: "simple-chart" },
-            React.createElement("svg", { viewBox: `0 0 ${W} ${H}`, role: "img", "aria-label": `Evolución de 10.000 ${currency}: estrategia frente a comprar ${holdLabel}` },
+            React.createElement("svg", { viewBox: `0 0 ${W} ${H}`, role: "img", "aria-label": `Evolución de ${money(summary.capital, currency)}: estrategia frente a comprar ${holdLabel}` },
                 ticks.map(v => React.createElement("g", { key: v },
                     React.createElement("line", { x1: padL, x2: W - padR, y1: y(v), y2: y(v), stroke: "var(--border)", strokeDasharray: v === summary.capital ? '4 4' : '0', strokeWidth: "1" }),
                     React.createElement("text", { x: padL - 8, y: y(v) + 4, textAnchor: "end", fontSize: "11", fill: "var(--text-2)" }, Math.round(v).toLocaleString('es-ES')))),
@@ -201,29 +234,35 @@ window.StockScannerUI = window.StockScannerUI || {};
                 React.createElement("div", { ref: el => { oscRefs.current[0] = el; }, className: "simple-osc-chart", role: "img", "aria-label": `${oscFilters.map(f => f.ind === 'RSI' ? 'RSI' : 'Estocástico').join(' y ')} de ${ticker}` })),
             !ok && React.createElement("p", { className: "simple-note" }, "No hay gr\u00E1fico disponible para este valor.")));
     });
-    // Gráfico de dona con leyenda: reparto del dinero por acción o por sector.
+    // Gráfico de dona: reparto del dinero por acción o por sector. Cada color lleva su ticker o sector
+    // encima; al pasar el ratón (o tocar) el centro muestra el nombre, el % y el dinero.
     const DONUT_COLORS = ['#5b8cff', '#2ec4a6', '#f5a623', '#e8577c', '#9b6dff', '#3fb8e6', '#8bc34a', '#ff7a45', '#d4b106', '#c06fd6', '#4dd0a0', '#ef6461'];
-    const Donut = memo(function Donut({ items, title, center, currency }) {
-        const R = 70, SW = 26, CIRC = 2 * Math.PI * R;
+    const cut = (t, n) => (t && t.length > n ? t.slice(0, n - 1) + '…' : t || '');
+    const Donut = memo(function Donut({ items, title, center, currency, capital = 10000 }) {
+        const [hover, setHover] = useState(null);
+        const C0 = 160, R = 112, SW = 60, CIRC = 2 * Math.PI * R;
         const total = items.reduce((t, i) => t + i.weight, 0) || 1;
         let acc = 0;
         const slices = items.map((it, i) => { const frac = it.weight / total, sl = { ...it, frac, off: acc, color: it.color || DONUT_COLORS[i % DONUT_COLORS.length] }; acc += frac; return sl; });
-        return (React.createElement("figure", { className: "simple-donut" },
-            React.createElement("div", { className: "simple-donut-body" },
-                React.createElement("svg", { viewBox: "0 0 200 200", role: "img", "aria-label": `${title}: ` + slices.map(sl => `${sl.label} ${pct(sl.weight, 1, false)}`).join(', ') },
-                    React.createElement("circle", { cx: "100", cy: "100", r: R, fill: "none", stroke: "var(--bg-3)", strokeWidth: SW }),
-                    slices.map(sl => React.createElement("circle", { key: sl.key, cx: "100", cy: "100", r: R, fill: "none", stroke: sl.color, strokeWidth: SW, strokeDasharray: `${Math.max(0, sl.frac * CIRC - (slices.length > 1 ? 1.5 : 0))} ${CIRC}`, strokeDashoffset: -sl.off * CIRC, transform: "rotate(-90 100 100)" },
-                        React.createElement("title", null, `${sl.label}: ${pct(sl.weight, 1, false)}`))),
-                    React.createElement("text", { x: "100", y: "98", textAnchor: "middle", fontSize: "30", fontWeight: "800", fill: "var(--text-0)" }, center.value),
-                    React.createElement("text", { x: "100", y: "120", textAnchor: "middle", fontSize: "13", fill: "var(--text-2)" }, center.label)),
-                React.createElement("ul", { className: "simple-donut-legend" }, slices.map(sl => (React.createElement("li", { key: sl.key },
-                    React.createElement("i", { style: { background: sl.color } }),
-                    React.createElement("span", null,
-                        React.createElement("b", null, sl.label),
-                        sl.sub && React.createElement("small", null, sl.sub)),
-                    React.createElement("strong", null,
-                        pct(sl.weight, 1, false),
-                        currency && React.createElement("small", null, money(sl.weight * 10000, currency))))))))));
+        const hs = hover != null ? slices.find(sl => sl.key === hover) : null;
+        return (React.createElement("figure", { className: "simple-donut big" },
+            React.createElement("svg", { viewBox: "0 0 320 320", role: "img", "aria-label": `${title}: ` + slices.map(sl => `${sl.label} ${pct(sl.weight, 1, false)}`).join(', '), onMouseLeave: () => setHover(null) },
+                React.createElement("circle", { cx: C0, cy: C0, r: R, fill: "none", stroke: "var(--bg-3)", strokeWidth: SW }),
+                slices.map(sl => (React.createElement("circle", { key: sl.key, cx: C0, cy: C0, r: R, fill: "none", stroke: sl.color, strokeWidth: hover === sl.key ? SW + 10 : SW, strokeDasharray: `${Math.max(0, sl.frac * CIRC - (slices.length > 1 ? 2 : 0))} ${CIRC}`, strokeDashoffset: -sl.off * CIRC, transform: `rotate(-90 ${C0} ${C0})`, opacity: hover != null && hover !== sl.key ? 0.45 : 1, className: "simple-donut-slice", tabIndex: 0, onMouseEnter: () => setHover(sl.key), onFocus: () => setHover(sl.key), onBlur: () => setHover(null), onClick: () => setHover(h => h === sl.key ? null : sl.key) },
+                    React.createElement("title", null, `${sl.label}${sl.sub ? ' · ' + sl.sub : ''}: ${pct(sl.weight, 1, false)}${currency ? ' · ' + money(sl.weight * capital, currency) : ''}`)))),
+                slices.filter(sl => sl.frac >= 0.035).map(sl => {
+                    const a = (sl.off + sl.frac / 2) * 2 * Math.PI - Math.PI / 2;
+                    const fs = sl.frac >= 0.15 ? 15 : sl.frac >= 0.07 ? 13 : 11;
+                    return React.createElement("text", { key: sl.key, x: C0 + R * Math.cos(a), y: C0 + R * Math.sin(a), textAnchor: "middle", dominantBaseline: "central", fontSize: fs, fontWeight: "800", className: "simple-donut-tag", "aria-hidden": "true" }, cut(sl.label, sl.frac >= 0.12 ? 14 : 9));
+                }),
+                hs ? React.createElement("g", { "aria-hidden": "true" },
+                    React.createElement("text", { x: C0, y: C0 - 30, textAnchor: "middle", fontSize: "20", fontWeight: "800", fill: "var(--text-0)" }, cut(hs.label, 16)),
+                    hs.sub && React.createElement("text", { x: C0, y: C0 - 10, textAnchor: "middle", fontSize: "11.5", fill: "var(--text-2)" }, cut(hs.sub, 26)),
+                    React.createElement("text", { x: C0, y: C0 + 18, textAnchor: "middle", fontSize: "24", fontWeight: "800", fill: hs.color }, pct(hs.weight, 1, false)),
+                    currency && React.createElement("text", { x: C0, y: C0 + 40, textAnchor: "middle", fontSize: "14", fill: "var(--text-1)" }, money(hs.weight * capital, currency))) : React.createElement("g", { "aria-hidden": "true" },
+                    React.createElement("text", { x: C0, y: C0 + 2, textAnchor: "middle", fontSize: "40", fontWeight: "800", fill: "var(--text-0)" }, center.value),
+                    React.createElement("text", { x: C0, y: C0 + 26, textAnchor: "middle", fontSize: "14", fill: "var(--text-2)" }, center.label),
+                    React.createElement("text", { x: C0, y: C0 + 46, textAnchor: "middle", fontSize: "11", fill: "var(--text-3)" }, "pasa el rat\u00F3n por un color")))));
     });
     const STAGES = [{ id: 'scan', label: 'Escáner' }, { id: 'portfolio', label: 'Portafolio Markowitz' }, { id: 'backtest', label: 'Backtest' }];
     function SimpleMode() {
@@ -244,6 +283,8 @@ window.StockScannerUI = window.StockScannerUI || {};
         const [run, setRun] = useState(null);
         const [error, setError] = useState(null);
         const [games, setGames] = useState(loadGames);
+        const [capital, setCapital] = useState(10000); // dinero a invertir (paso 4), también el del backtest
+        const [rankMsg, setRankMsg] = useState(null);
         const cacheRef = useRef({});
         const abortRef = useRef(null);
         useEffect(() => () => { var _a; return (_a = abortRef.current) === null || _a === void 0 ? void 0 : _a.abort(); }, []);
@@ -268,10 +309,13 @@ window.StockScannerUI = window.StockScannerUI || {};
         const running = stage !== 'idle';
         const ready = market && strategy && !running;
         // Si cambian mercado, estrategia o filtro, los resultados anteriores ya no corresponden.
-        useEffect(() => { if (!abortRef.current) {
-            setRun(null);
-            setError(null);
-        } }, [marketId, strategyId, mktFilter]);
+        useEffect(() => {
+            var _a, _b;
+            if (run && !abortRef.current && (((_a = run.market) === null || _a === void 0 ? void 0 : _a.id) !== marketId || ((_b = run.strategy) === null || _b === void 0 ? void 0 : _b.id) !== strategyId || !!run.mktOn !== mktOnOf(baseStrategy))) {
+                setRun(null);
+                setError(null);
+            }
+        }, [marketId, strategyId, mktFilter]);
         const n = x => Number(x).toLocaleString('es-ES');
         const scrollSoon = id => setTimeout(() => { var _a, _b; if (typeof document !== 'undefined')
             (_b = (_a = document.getElementById(id)) === null || _a === void 0 ? void 0 : _a.scrollIntoView) === null || _b === void 0 ? void 0 : _b.call(_a, { behavior: 'smooth', block: 'start' }); }, 80);
@@ -303,7 +347,7 @@ window.StockScannerUI = window.StockScannerUI || {};
         const runScan = () => {
             if (!ready)
                 return undefined;
-            const cfg = { market, strategy, tag: tagOf(baseStrategy) };
+            const cfg = { market, strategy, tag: tagOf(baseStrategy), mktOn: mktOnOf(baseStrategy) };
             setRun({ ...cfg });
             setSelTicker(null);
             return runStep('scan', async (ac) => {
@@ -326,6 +370,7 @@ window.StockScannerUI = window.StockScannerUI || {};
             if (!(run === null || run === void 0 ? void 0 : run.scan) || running)
                 return undefined;
             const { strategy: st, scan: sc } = run;
+            const cap = capital;
             return runStep('portfolio', async () => {
                 setProgress('Probando 10.000 combinaciones de pesos');
                 let portfolio = null, portfolioError = null;
@@ -337,20 +382,20 @@ window.StockScannerUI = window.StockScannerUI || {};
                     catch {
                         return {};
                     } };
-                    const out = await C.buildPortfolioWorkflow({ ...C.buildSimplePortfolioOptions({ strategy: st, candidates: sc.passing, cacheRef, fetchSectors }), setPortfolio: p => { portfolio = p; } });
+                    const out = await C.buildPortfolioWorkflow({ ...C.buildSimplePortfolioOptions({ strategy: st, candidates: sc.passing, cacheRef, fetchSectors, capital: cap }), setPortfolio: p => { portfolio = p; } });
                     if (!(out === null || out === void 0 ? void 0 : out.ok))
                         portfolioError = (out === null || out === void 0 ? void 0 : out.message) || 'No se pudo construir el portafolio.';
                 }
                 else
                     portfolioError = 'Hoy no hay suficientes acciones que cumplan la estrategia para construir un portafolio (hacen falta al menos 2).';
-                setRun(r => ({ ...r, portfolio, portfolioError }));
+                setRun(r => ({ ...r, capital: cap, portfolio, portfolioError }));
             });
         };
         // Paso 5: backtest de la estrategia
         const runBacktest = () => {
             if (!(run === null || run === void 0 ? void 0 : run.scan) || running)
                 return undefined;
-            const cfg = { market: run.market, strategy: run.strategy, period };
+            const cfg = { market: run.market, strategy: run.strategy, period, capital: run.capital || capital };
             return runStep('backtest', async (ac) => {
                 setProgress('Preparando el backtest');
                 let raw = null;
@@ -368,17 +413,66 @@ window.StockScannerUI = window.StockScannerUI || {};
                         }
                     },
                 });
-                const summary = raw && C.summarizeSimpleResult(raw);
+                const summary = raw && C.summarizeSimpleResult(raw, { capital: cfg.capital });
                 const backtest = summary ? { summary, annReturn: raw.annReturn, sharpe: raw.sharpe, commissions: raw.totalCommissionPaid } : null;
                 setRun(r => ({ ...r, period, backtest, backtestError: backtest ? null : ((out === null || out === void 0 ? void 0 : out.message) || 'No hubo datos suficientes para el backtest.') }));
                 if (summary) {
-                    const game = { id: Date.now(), market: cfg.market.name, flag: cfg.market.icon, strategy: cfg.strategy.name + (run.tag || ''), icon: cfg.strategy.icon, period: period.label, ret: summary.ret, benchRet: summary.benchRet, stars: summary.stars };
-                    setGames(prev => { const next = [game, ...prev].slice(0, 30); saveGames(next); return next; });
+                    const game = { id: Date.now(), market: cfg.market.name, flag: cfg.market.icon, strategy: cfg.strategy.name + (run.tag || ''), icon: cfg.strategy.icon, period: period.label, capital: cfg.capital, ret: summary.ret, benchRet: summary.benchRet, stars: summary.stars, saved: false };
+                    // Foto completa de la partida: resultados + velas de las acciones de la tabla.
+                    try {
+                        const prices = {};
+                        run.scan.passing.slice(0, 12).forEach(r => {
+                            var _a;
+                            const d = (_a = cacheRef.current[r.ticker]) === null || _a === void 0 ? void 0 : _a['1wk'];
+                            if (d === null || d === void 0 ? void 0 : d.ok)
+                                prices[r.ticker] = { ticker: r.ticker, tf: '1wk', ok: true, opens: d.opens, highs: d.highs, lows: d.lows, closes: d.closes, volumes: d.volumes, times: d.times, price: d.price, prevClose: d.prevClose };
+                        });
+                        const pfSnap = run.portfolio ? { ...run.portfolio, correlationMatrix: null, equityCurve: null,
+                            frontier: (run.portfolio.frontier || []).filter((_, i, a) => i % Math.max(1, Math.ceil(a.length / 900)) === 0) } : null;
+                        const snap = JSON.parse(JSON.stringify({ v: 1, savedAt: game.id, marketId: cfg.market.id, strategyId: cfg.strategy.id, mktOn: !!run.mktOn, tag: run.tag || '',
+                            period, capital: cfg.capital, scan: run.scan, portfolio: pfSnap, portfolioError: run.portfolioError || null, backtest, prices }));
+                        await saveSnapshot(game.id, snap);
+                        game.saved = true;
+                    }
+                    catch (e) {
+                        console.warn('Onix modo simple: no se pudo guardar la partida completa', e);
+                    }
+                    setGames(prev => { const next = [game, ...prev].slice(0, 30); saveGames(next); pruneSnapshots(next.map(g => g.id)).catch(() => { }); return next; });
+                    setRun(r => ({ ...r, gameId: game.id }));
                 }
             });
         };
+        const openGame = async (g) => {
+            var _a;
+            if (running)
+                return;
+            let snap = null;
+            try {
+                snap = await loadSnapshot(g.id);
+            }
+            catch { }
+            const mk = snap && markets.find(m => m.id === snap.marketId), base = snap && strategies.find(x => x.id === snap.strategyId);
+            if (!snap || !mk || !base) {
+                setRankMsg('Esta partida no tiene los detalles guardados (es anterior a esta opción o se borraron los datos del navegador).');
+                return;
+            }
+            setRankMsg(null);
+            setError(null);
+            setSelTicker(null);
+            setMarketId(mk.id);
+            setStrategyId(base.id);
+            setMktFilter(m => ({ ...m, [base.id]: snap.mktOn }));
+            if ((_a = snap.period) === null || _a === void 0 ? void 0 : _a.years)
+                setYears(snap.period.years);
+            if (snap.capital)
+                setCapital(snap.capital);
+            setRun({ market: mk, strategy: C.simpleWithMarketFilter(base, snap.mktOn), tag: snap.tag, mktOn: snap.mktOn, period: snap.period, capital: snap.capital,
+                scan: snap.scan, portfolio: snap.portfolio, portfolioError: snap.portfolioError, backtest: snap.backtest, backtestError: null,
+                prices: snap.prices, savedAt: snap.savedAt, gameId: g.id });
+            scrollSoon('simple-panel-scan');
+        };
         const stageState = id => (run === null || run === void 0 ? void 0 : run[id + 'Error']) ? 'error' : (run === null || run === void 0 ? void 0 : run[id]) ? 'done' : stage === id ? 'active' : 'todo';
-        const ranking = [...games].sort((a, b) => b.ret - a.ret).slice(0, 8);
+        const ranking = [...games].sort((a, b) => b.ret - a.ret).slice(0, 10);
         const medal = i => ['🥇', '🥈', '🥉'][i] || `${i + 1}.`;
         const cur = (_a = run === null || run === void 0 ? void 0 : run.market) === null || _a === void 0 ? void 0 : _a.currency;
         const scan = run === null || run === void 0 ? void 0 : run.scan, pf = run === null || run === void 0 ? void 0 : run.portfolio, bt = run === null || run === void 0 ? void 0 : run.backtest;
@@ -485,6 +579,12 @@ window.StockScannerUI = window.StockScannerUI || {};
                     React.createElement("button", { type: "button", className: "simple-play", onClick: runScan, disabled: !ready }, !strategy ? 'Elige una estrategia para empezar' : (run === null || run === void 0 ? void 0 : run.scan) ? '↻  Paso 3 · Volver a escanear' : '▶  Paso 3 · Ejecutar el escáner')),
                 error && !run && React.createElement("div", { className: "simple-error", role: "alert" }, error)),
             run && React.createElement("div", null,
+                run.savedAt && React.createElement("div", { className: "simple-saved", role: "status" },
+                    React.createElement("span", { "aria-hidden": "true" }, "\uD83D\uDCC2"),
+                    React.createElement("div", null,
+                        React.createElement("b", null, `Partida guardada · ${new Date(run.savedAt).toLocaleString('es-ES', { day: 'numeric', month: 'long', year: 'numeric', hour: '2-digit', minute: '2-digit' })}`),
+                        React.createElement("small", null, "Resultados y precios de ese d\u00EDa. Pulsa \u00ABVolver a escanear\u00BB para repetirla con datos de hoy.")),
+                    React.createElement("button", { type: "button", className: "simple-link", onClick: () => setRun(null) }, "Cerrar")),
                 scan && React.createElement("section", { id: "simple-panel-scan", className: "simple-panel", "aria-label": "Esc\u00E1ner" },
                     React.createElement("header", null,
                         React.createElement("span", { className: 'simple-panel-n' + (done('scan') ? ' done' : '') }, "3"),
@@ -529,12 +629,19 @@ window.StockScannerUI = window.StockScannerUI || {};
                                     React.createElement("td", null, num(r.sharpe1y)),
                                     React.createElement("td", null, inPortfolio.has(r.ticker) && React.createElement("span", { className: "simple-tag", title: "En cartera", "aria-label": "En cartera" }, "\u2713"))))))),
                             React.createElement("p", { className: "simple-note" }, `Haz clic en una fila para ver su gráfico.${scan.passing.length > 12 ? ` Y ${scan.passing.length - 12} acciones más.` : ''} Las ${Math.min(scan.passing.length, C.SIMPLE_CANDIDATES)} con mejor Sharpe del último año pasan al optimizador.`)),
-                        selected && React.createElement(SimpleCandles, { ticker: selected, data: (_c = cacheRef.current[selected]) === null || _c === void 0 ? void 0 : _c['1wk'], strategy: run.strategy, currency: cur, row: scan.passing.find(r => r.ticker === selected) }))
+                        selected && React.createElement(SimpleCandles, { ticker: selected, data: run.prices ? run.prices[selected] : (_c = cacheRef.current[selected]) === null || _c === void 0 ? void 0 : _c['1wk'], strategy: run.strategy, currency: cur, row: scan.passing.find(r => r.ticker === selected) }))
                         : React.createElement("p", { className: "simple-note" }, "Hoy ninguna acci\u00F3n del mercado cumple las reglas: la estrategia esperar\u00EDa.")),
                 scan && !pf && !run.portfolioError && !running && React.createElement("div", { className: "simple-next" },
                     React.createElement("p", null,
                         React.createElement("b", null, "Siguiente:"),
                         " con las mejores acciones del esc\u00E1ner, Markowitz busca el reparto del dinero con la mejor rentabilidad por unidad de riesgo."),
+                    React.createElement("div", { className: "simple-periods simple-capital", role: "group", "aria-label": "Dinero a invertir" },
+                        React.createElement("span", null, "Dinero:"),
+                        CAPITAL_OPTIONS.map(v => React.createElement("button", { type: "button", key: v, "aria-pressed": capital === v, onClick: () => setCapital(v) }, v.toLocaleString('es-ES'))),
+                        React.createElement("label", null,
+                            React.createElement("input", { type: "number", min: "100", step: "100", inputMode: "numeric", "aria-label": `Otra cantidad en ${cur}`, value: capital, onChange: e => { const v = Math.round(Number(e.target.value)); if (Number.isFinite(v) && v > 0)
+                                    setCapital(v); } }),
+                            cur)),
                     React.createElement("button", { type: "button", className: "simple-play", onClick: runPortfolio }, "\u25B6  Paso 4 \u00B7 Construir el portafolio")),
                 run.portfolioError && React.createElement("section", { id: "simple-panel-portfolio", className: "simple-panel", "aria-label": "Portafolio" },
                     React.createElement("header", null,
@@ -574,8 +681,8 @@ window.StockScannerUI = window.StockScannerUI || {};
                                     React.createElement("button", { type: "button", "aria-pressed": weightView === 'stock', onClick: () => setWeightView('stock') }, "Por acci\u00F3n"),
                                     React.createElement("button", { type: "button", "aria-pressed": weightView === 'sector', onClick: () => setWeightView('sector') }, "Por sector"))),
                             weightView === 'stock'
-                                ? React.createElement(Donut, { key: "stock", title: "Peso por acci\u00F3n", currency: cur, center: stockCenter, items: stockItems })
-                                : React.createElement(Donut, { key: "sector", title: "Peso por sector", currency: cur, center: sectorCenter, items: sectorItems })))),
+                                ? React.createElement(Donut, { key: "stock", title: "Peso por acci\u00F3n", currency: cur, capital: run.capital || 10000, center: stockCenter, items: stockItems })
+                                : React.createElement(Donut, { key: "sector", title: "Peso por sector", currency: cur, capital: run.capital || 10000, center: sectorCenter, items: sectorItems })))),
                 (pf || run.portfolioError) && !bt && !run.backtestError && !running && React.createElement("div", { className: "simple-next" },
                     React.createElement("p", null,
                         React.createElement("b", null, "Siguiente:"),
@@ -596,7 +703,7 @@ window.StockScannerUI = window.StockScannerUI || {};
                         React.createElement("span", { className: 'simple-panel-n' + (done('backtest') ? ' done' : '') }, "5"),
                         React.createElement("div", null,
                             React.createElement("h2", null, "Backtest \u00B7 \u00BFhabr\u00EDa funcionado en el pasado?"),
-                            React.createElement("p", null, `${((_d = run.period) === null || _d === void 0 ? void 0 : _d.label) ? 'Periodo: ' + run.period.label + '. ' : ''}La estrategia se aplica semana a semana desde ${monthYear(bt.summary.start)} con 10.000 ${cur}: compra cuando se cumplen las reglas, vende cuando se cumplen las de salida, reparte el dinero según rentabilidad/riesgo y descuenta comisiones.`))),
+                            React.createElement("p", null, `${((_d = run.period) === null || _d === void 0 ? void 0 : _d.label) ? 'Periodo: ' + run.period.label + '. ' : ''}La estrategia se aplica semana a semana desde ${monthYear(bt.summary.start)} con ${money(bt.summary.capital, cur)}: compra cuando se cumplen las reglas, vende cuando se cumplen las de salida, reparte el dinero según rentabilidad/riesgo y descuenta comisiones.`))),
                     React.createElement("div", { className: "simple-result-head" },
                         React.createElement("div", { className: "simple-result-title" }, bt.summary.headline),
                         React.createElement(Stars, { n: bt.summary.stars })),
@@ -650,7 +757,7 @@ window.StockScannerUI = window.StockScannerUI || {};
             ranking.length > 0 && React.createElement("section", { className: "simple-ranking", "aria-label": "Tus partidas" },
                 React.createElement("div", { className: "simple-ranking-head" },
                     React.createElement("h2", null, "\uD83C\uDFC1 Tus partidas"),
-                    React.createElement("button", { type: "button", className: "simple-link", onClick: () => { setGames([]); saveGames([]); } }, "Borrar")),
+                    React.createElement("button", { type: "button", className: "simple-link", onClick: () => { setGames([]); saveGames([]); clearSnapshots().catch(() => { }); setRankMsg(null); } }, "Borrar")),
                 React.createElement("table", null,
                     React.createElement("thead", null,
                         React.createElement("tr", null,
@@ -660,8 +767,9 @@ window.StockScannerUI = window.StockScannerUI || {};
                             React.createElement("th", null, "Periodo"),
                             React.createElement("th", null, "Resultado"),
                             React.createElement("th", null, "\u00CDndice"),
-                            React.createElement("th", null, "Estrellas"))),
-                    React.createElement("tbody", null, ranking.map((g, i) => (React.createElement("tr", { key: g.id },
+                            React.createElement("th", null, "Estrellas"),
+                            React.createElement("th", null))),
+                    React.createElement("tbody", null, ranking.map((g, i) => (React.createElement("tr", { key: g.id, className: (run === null || run === void 0 ? void 0 : run.gameId) === g.id ? 'sel' : '' },
                         React.createElement("td", null, medal(i)),
                         React.createElement("td", null, `${g.icon} ${g.strategy}`),
                         React.createElement("td", null, `${g.flag} ${g.market}`),
@@ -669,7 +777,11 @@ window.StockScannerUI = window.StockScannerUI || {};
                         React.createElement("td", { className: g.ret >= 0 ? 'up' : 'down' }, pct(g.ret)),
                         React.createElement("td", null, pct(g.benchRet)),
                         React.createElement("td", null,
-                            React.createElement(Stars, { n: g.stars, size: 15 })))))))),
+                            React.createElement(Stars, { n: g.stars, size: 15 })),
+                        React.createElement("td", null, g.saved
+                            ? React.createElement("button", { type: "button", className: "simple-view", onClick: () => openGame(g), disabled: running, "aria-label": `Ver la partida ${g.strategy} en ${g.market}` }, "Ver \u25B8")
+                            : React.createElement("span", { className: "simple-view-na", title: "Partida anterior a esta opci\u00F3n: no se guardaron los detalles" }, "\u2014"))))))),
+                rankMsg && React.createElement("p", { className: "simple-note", role: "status" }, rankMsg)),
             React.createElement("p", { className: "simple-disclaimer" }, "Datos reales de Yahoo Finance. Rentabilidades pasadas no garantizan resultados futuros; es una herramienta educativa, no una recomendaci\u00F3n de inversi\u00F3n.")));
     }
     window.StockScannerUI.SimpleMode = SimpleMode;

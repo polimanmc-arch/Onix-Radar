@@ -428,3 +428,23 @@ body,[data-theme="light"] body{background:var(--bg-0);background-image:none}
 .simple-next p b{color:var(--text-0)}
 .simple-next .simple-periods{margin:0}
 .simple-loading>.simple-link{align-self:center;flex:0 0 auto}
+
+/* ── Modo simple: dinero a invertir, partidas guardadas y dona grande ─── */
+.simple-capital label{display:inline-flex;align-items:center;gap:6px;font-size:13px;color:var(--text-2)}
+.simple-capital input{width:110px;padding:7px 10px;border-radius:999px;border:1px solid var(--border);background:var(--bg-2);color:var(--text-0);font:600 13px var(--font-body);font-variant-numeric:tabular-nums}
+.simple-capital input:focus{outline:2px solid var(--accent);outline-offset:1px}
+.simple-saved{display:flex;align-items:center;gap:12px;margin-top:18px;padding:12px 16px;border:1px solid var(--accent);border-radius:14px;background:var(--bg-1)}
+.simple-saved>span{font-size:22px}
+.simple-saved>div{flex:1;min-width:0;display:flex;flex-direction:column;gap:2px}
+.simple-saved b{font-size:14px;color:var(--text-0)}
+.simple-saved small{font-size:12.5px;color:var(--text-2)}
+.simple-view{border:1px solid var(--accent);background:transparent;color:var(--accent);border-radius:999px;padding:4px 12px;font:700 12.5px var(--font-body);cursor:pointer;white-space:nowrap}
+.simple-view:hover:not(:disabled){background:var(--accent);color:#fff}
+.simple-view:disabled{opacity:.5;cursor:default}
+.simple-view-na{color:var(--text-3)}
+.simple-ranking tr.sel td{background:var(--bg-2)}
+.simple-donut.big{display:flex;justify-content:center;margin:4px 0 0}
+.simple-donut.big svg{width:100%;max-width:380px;height:auto;display:block;overflow:visible}
+.simple-donut-slice{cursor:pointer;transition:stroke-width .15s ease,opacity .15s ease;outline:none}
+.simple-donut-tag{fill:#fff;stroke:rgba(0,0,0,.45);stroke-width:3px;paint-order:stroke;pointer-events:none;font-family:var(--font-body)}
+.simple-next .simple-play{margin-left:auto}
