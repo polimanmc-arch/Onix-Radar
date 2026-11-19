@@ -13,6 +13,8 @@ window.StockScannerUI = window.StockScannerUI || {};
   const dayMonthYear = t => (t ? new Date(t * 1000).toLocaleDateString('es-ES', { day: '2-digit', month: 'short', year: '2-digit' }) : '—');
   const exitReason = r => (!r ? '—' : /regimen de mercado/i.test(r) ? 'Filtro S&P 500 bajista' : /^(Short )?Regla/.test(r) ? 'Reglas de venta'
     : /índice/i.test(r) ? 'Salió del índice' : /^Stop/.test(r) ? 'Stop de pérdidas' : /fin|final|abierta/i.test(r) ? 'Fin del periodo' : r);
+  // Nombre corto de la empresa: sin "Inc.", "Corporation", "Holdings"...
+  const companyShort = n => String(n || '').replace(/,?\s+(Inc\.?|Incorporated|Corporation|Corp\.?|Company|Co\.?|Ltd\.?|Limited|plc|PLC|N\.V\.|S\.A\.|AG|SE|Holdings?|Group|L\.P\.)\b\.?/g, '').replace(/\s+&$/, '').trim();
   const year = t => (t ? new Date(t * 1000).getFullYear() : '');
   const monthYear = t => (t ? new Date(t * 1000).toLocaleDateString('es-ES', { month: 'long', year: 'numeric' }) : '');
   const SECTOR_ES = { Technology: 'Tecnología', 'Financial Services': 'Financiero', Healthcare: 'Salud', 'Consumer Cyclical': 'Consumo cíclico',
@@ -328,7 +330,7 @@ window.StockScannerUI = window.StockScannerUI || {};
   // encima; al pasar el ratón (o tocar) el centro muestra el nombre, el % y el dinero.
   const DONUT_COLORS = ['#5b8cff', '#2ec4a6', '#f5a623', '#e8577c', '#9b6dff', '#3fb8e6', '#8bc34a', '#ff7a45', '#d4b106', '#c06fd6', '#4dd0a0', '#ef6461'];
   const cut = (t, n) => (t && t.length > n ? t.slice(0, n - 1) + '…' : t || '');
-  const Donut = memo(function Donut({ items, title, center, currency, capital = 10000, onPick = null }){
+  const Donut = memo(function Donut({ items, title, center, currency, capital = 10000, onPick = null, showNames = false }){
     const [hover, setHover] = useState(null);
     const C0 = 160, R = 112, SW = 60, CIRC = 2 * Math.PI * R;
     const total = items.reduce((t, i) => t + i.weight, 0) || 1;
@@ -353,8 +355,12 @@ window.StockScannerUI = window.StockScannerUI || {};
           {slices.filter(sl => sl.frac >= 0.035).map(sl => {
             const a = (sl.off + sl.frac / 2) * 2 * Math.PI - Math.PI / 2;
             const fs = sl.frac >= 0.15 ? 15 : sl.frac >= 0.07 ? 13 : 11;
-            return <text key={sl.key} x={C0 + R * Math.cos(a)} y={C0 + R * Math.sin(a)} textAnchor="middle" dominantBaseline="central"
-              fontSize={fs} fontWeight="800" className="simple-donut-tag" aria-hidden="true">{cut(sl.label, sl.frac >= 0.12 ? 14 : 9)}</text>;
+            const cx = C0 + R * Math.cos(a), cy = C0 + R * Math.sin(a);
+            // Por acción: el nombre de la empresa debajo del ticker cuando el trozo es grande.
+            const name = showNames && sl.name && sl.frac >= 0.07 ? cut(sl.name, sl.frac >= 0.15 ? 16 : 11) : '';
+            return <text key={sl.key} x={cx} y={name ? cy - 6 : cy} textAnchor="middle" dominantBaseline="central"
+              fontSize={fs} fontWeight="800" className="simple-donut-tag" aria-hidden="true">{cut(sl.label, sl.frac >= 0.12 ? 14 : 9)}
+              {name && <tspan x={cx} dy={fs * 0.95} fontSize={Math.max(9, fs - 4)} fontWeight="600">{name}</tspan>}</text>;
           })}
           {hs ? <g aria-hidden="true">
             <text x={C0} y={C0 - 30} textAnchor="middle" fontSize="20" fontWeight="800" fill="var(--text-0)">{cut(hs.label, 16)}</text>
@@ -613,6 +619,7 @@ window.StockScannerUI = window.StockScannerUI || {};
       if(!pf) return [];
       const sharesOf = Object.fromEntries((order?.rows || []).map(r => [r.ticker, r]));
       const items = pf.allocations.map(a => ({ key: a.ticker, label: a.ticker, sub: a.shortName && a.shortName !== a.ticker ? a.shortName : sectorEs(a.sector), weight: Math.abs(a.weight),
+        name: a.shortName && a.shortName !== a.ticker ? companyShort(a.shortName) : '',
         shares: sharesOf[a.ticker]?.shares, price: sharesOf[a.ticker]?.price }));
       const cash = 1 - items.reduce((t, i) => t + i.weight, 0);
       // Con pocas acciones, el límite de 25 % por acción deja parte en efectivo.
@@ -809,7 +816,7 @@ window.StockScannerUI = window.StockScannerUI || {};
                   </div>
                 </div>
                 {weightView === 'stock'
-                  ? <Donut key="stock" title="Peso por acción" currency={cur} capital={run.capital || 0} center={stockCenter} items={stockItems} onPick={openStock}/>
+                  ? <Donut key="stock" title="Peso por acción" currency={cur} capital={run.capital || 0} center={stockCenter} items={stockItems} onPick={openStock} showNames/>
                   : <Donut key="sector" title="Peso por sector" currency={cur} capital={run.capital || 0} center={sectorCenter} items={sectorItems}/>}
               </div>
             </div>

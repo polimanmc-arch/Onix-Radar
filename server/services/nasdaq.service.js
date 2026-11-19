@@ -109,4 +109,14 @@ async function getUsSector(symbol) {
   return sector ? { sector, industry: r.industry || '' } : null;
 }
 
-module.exports = { getTickers, getRussell2000, getUsSector, getScreenerRows };
+// Nombre de la empresa según Nasdaq, sin la coletilla del tipo de acción ("Common Stock", "Class A"...).
+async function getUsName(symbol) {
+  if (!sectorMap || Date.now() - sectorMapAt > 12 * 60 * 60 * 1000) await getUsSector('__init__');
+  const r = sectorMap?.get(String(symbol || '').toUpperCase());
+  if (!r?.name) return null;
+  return r.name
+    .replace(/\s+(Class [A-Z]\s+)?(Common Stock|Ordinary Shares|Common Shares|Capital Stock|Subordinate Voting Shares|American Depositary Shares).*$/i, '')
+    .replace(/\s+\(The\)$/i, '').trim() || null;
+}
+
+module.exports = { getTickers, getRussell2000, getUsSector, getUsName, getScreenerRows };

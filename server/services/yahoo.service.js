@@ -3,7 +3,7 @@ const { getDiskCache, setDiskCache, pruneDiskCache } = require('../utils/diskCac
 const { fetchJson, fetchText } = require('../utils/http');
 const SECTOR_MAP = require('../data/sectorMap');
 const yf2 = require('./yahooFinance2');
-const { getUsSector } = require('./nasdaq.service');
+const { getUsSector, getUsName } = require('./nasdaq.service');
 
 const CHART_MEMORY_TTL_MS = Number(process.env.ONIX_CHART_MEMORY_TTL_MS) || 15 * 60_000;
 const CHART_DISK_TTL_MS = Number(process.env.ONIX_CHART_DISK_TTL_MS) || 12 * 60 * 60 * 1000;
@@ -391,6 +391,15 @@ async function getQuotes(symbols, options = {}) {
     Object.assign(out, partial);
   }
 
+  // Sin nombre de Yahoo (habitual desde servidores en la nube): el nombre de la empresa según Nasdaq.
+  for (const symbol of cleaned) {
+    const q = out[symbol];
+    if (q?.shortName && q.shortName !== symbol) continue;
+    try {
+      const name = await getUsName(symbol);
+      if (name) out[symbol] = { ...(q || {}), symbol, shortName: name, longName: q?.longName && q.longName !== symbol ? q.longName : name };
+    } catch (_) {}
+  }
   return out;
 }
 
