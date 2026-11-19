@@ -9,7 +9,8 @@
   });
 
   const MARKETS = [
-    { id: 'DOW30', preset: 'DOW30', name: 'Dow Jones 30', flag: '🇺🇸', blurb: 'Las 30 grandes clásicas de EE. UU.', benchmark: 'SPY', currency: '$' },
+    { id: 'SP500', preset: 'SP500', name: 'S&P 500', flag: '🗽', blurb: 'Las 500 mayores empresas de EE. UU.', benchmark: 'SPY', currency: '$' },
+    { id: 'DOW30', preset: 'DOW30', name: 'Dow Jones 30', flag: '🇺🇸', blurb: 'Las 30 grandes clásicas de EE. UU.', benchmark: 'DIA', currency: '$' },
     { id: 'NASDAQ100', preset: 'NASDAQ100', name: 'Nasdaq 100', flag: '💻', blurb: 'Tecnológicas y crecimiento', benchmark: 'QQQ', currency: '$' },
     { id: 'SPAIN_IBEX35', preset: 'SPAIN_IBEX35', name: 'IBEX 35', flag: '🇪🇸', blurb: 'Las mayores empresas españolas', benchmark: '^IBEX', currency: '€' },
     { id: 'GERMANY_DAX', preset: 'GERMANY_DAX', name: 'DAX 40', flag: '🇩🇪', blurb: 'Las grandes de Alemania', benchmark: '^GDAXI', currency: '€' },
@@ -92,7 +93,28 @@
     };
   }
 
+  // Acciones que hoy cumplen la estrategia, con los precios semanales que el backtest ya descargó
+  // (sin un segundo escaneo): última vela semanal cerrada, como el scanner.
+  // Sólo las acciones del mercado elegido (la caché también guarda otros mercados y el índice).
+  function todaySignals({ dataByTicker, tickers, strategy, limit = 18 }){
+    const { buildSignalSliceFromIndex, testFilterAligned } = window.StockScannerCore;
+    const out = [];
+    for(const ticker of new Set(tickers || [])){
+      const d = dataByTicker?.[ticker]?.['1wk'];
+      if(!d?.ok) continue;
+      const slice = buildSignalSliceFromIndex(d, 1);
+      if(!slice.ok) continue;
+      if(strategy.entry.every(f => testFilterAligned(f, { '1wk': slice, _meta: {} }).pass)){
+        const price = slice.closes[0], prev = slice.closes[1];
+        out.push({ ticker, price, chg: prev ? (price / prev - 1) * 100 : null });
+      }
+    }
+    out.sort((a, b) => a.ticker.localeCompare(b.ticker));
+    return { total: out.length, list: out.slice(0, limit) };
+  }
+
   window.StockScannerCore = Object.assign(window.StockScannerCore || {}, {
+    todaySimpleSignals: todaySignals,
     SIMPLE_MARKETS: MARKETS, SIMPLE_STRATEGIES: STRATEGIES, SIMPLE_PERIODS: PERIODS, SIMPLE_CAPITAL: CAPITAL,
     buildSimpleBacktestOptions, summarizeSimpleResult,
   });

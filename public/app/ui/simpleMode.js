@@ -56,7 +56,7 @@ window.StockScannerUI = window.StockScannerUI || {};
   function SimpleMode({ notify }){
     const C = core();
     const markets = C.SIMPLE_MARKETS, strategies = C.SIMPLE_STRATEGIES, periods = C.SIMPLE_PERIODS;
-    const [marketId, setMarketId] = useState(markets[0].id);
+    const [marketId, setMarketId] = useState('DOW30');
     const [strategyId, setStrategyId] = useState(null);
     const [years, setYears] = useState(3);
     const [running, setRunning] = useState(false);
@@ -90,18 +90,11 @@ window.StockScannerUI = window.StockScannerUI || {};
         });
         const summary = raw && C.summarizeSimpleResult(raw);
         if(!summary){ setError(out?.message || 'No hubo datos suficientes para simular. Prueba con otro mercado.'); return; }
-        setProgress({ pct: 97, label: 'Buscando señales de hoy' });
-        let rows = [];
-        const scanRef = { current: {} };
-        const tickers = (window.StockScannerConfig.UNIVERSE_PRESETS[market.preset]?.tickers || []);
-        await C.runScanWorkflow({
-          scanning: false, tickers, filters: C.buildSimpleBacktestOptions({ market, strategy, period }).entryRules[0].conditions, shortFilters: [],
-          scanDirection: 'long', conc: 12, minHistoryYears: 0, abortRef: { current: null }, dataCacheRef: scanRef,
-          setScanning: () => {}, setSearch: () => {}, setOnlyPass: () => {}, setTab: () => {}, setProg: () => {},
-          setResults: r => { rows = r; }, addLog: () => {}, fetchSectors: async () => ({}), fetchQuotes: async () => ({}), setSectorData: () => {},
-        }).catch(() => {});
-        const signals = rows.filter(r => r.passed && !r.err).map(r => ({ ticker: r.ticker, price: r.price, chg: r.chg })).slice(0, 18);
-        setOutcome({ summary, signals, market, strategy, period });
+        // Señales de hoy con los precios semanales ya descargados (sin otra descarga).
+        const tickers = window.StockScannerConfig.UNIVERSE_PRESETS[market.preset]?.tickers || [];
+        const today = C.todaySimpleSignals({ dataByTicker: cacheRef.current, tickers, strategy });
+        const signals = today.list, signalsTotal = today.total;
+        setOutcome({ summary, signals, signalsTotal, market, strategy, period });
         const game = { id: Date.now(), market: market.name, flag: market.flag, strategy: strategy.name, icon: strategy.icon, period: period.label, ret: summary.ret, benchRet: summary.benchRet, stars: summary.stars, currency: market.currency };
         setGames(prev => { const next = [game, ...prev].slice(0, 30); saveGames(next); return next; });
         setTimeout(() => resultRef.current?.scrollIntoView?.({ behavior: 'smooth', block: 'start' }), 60);
@@ -127,7 +120,7 @@ window.StockScannerUI = window.StockScannerUI || {};
 
         <section className="simple-step" aria-labelledby="simple-step-1">
           <h2 id="simple-step-1"><span className="simple-step-n">1</span>Elige tu mercado</h2>
-          <div className="simple-grid simple-grid-4">
+          <div className="simple-grid simple-grid-markets">
             {markets.map(m => (
               <button type="button" key={m.id} className="simple-card" aria-pressed={m.id === marketId} onClick={() => setMarketId(m.id)} disabled={running}>
                 <span className="simple-card-icon">{m.flag}</span>
@@ -203,9 +196,9 @@ window.StockScannerUI = window.StockScannerUI || {};
           </div>
 
           <div className="simple-signals">
-            <h3>{`📡 Hoy esta estrategia elegiría (${outcome.signals.length})`}</h3>
+            <h3>{`📡 Hoy esta estrategia elegiría (${outcome.signalsTotal})`}</h3>
             {outcome.signals.length
-              ? <div className="simple-chips">{outcome.signals.map(x => <span key={x.ticker} className="simple-chip"><b>{x.ticker}</b>{Number.isFinite(x.price) ? ` ${x.price.toFixed(2)}` : ''}</span>)}</div>
+              ? <div className="simple-chips">{outcome.signals.map(x => <span key={x.ticker} className="simple-chip"><b>{x.ticker}</b>{Number.isFinite(x.price) ? ` ${x.price.toFixed(2)}` : ''}</span>)}{outcome.signalsTotal > outcome.signals.length && <span className="simple-chip">{`y ${outcome.signalsTotal - outcome.signals.length} más`}</span>}</div>
               : <p>Hoy ninguna acción de este mercado cumple las condiciones: la estrategia esperaría.</p>}
           </div>
 

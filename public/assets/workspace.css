@@ -146,7 +146,7 @@ body,[data-theme="light"] body{background:var(--bg-0);background-image:none}
 .simple-step h2{display:flex;align-items:center;gap:10px;font-size:18px;font-weight:700;margin:0 0 12px}
 .simple-step-n{display:inline-grid;place-items:center;width:28px;height:28px;border-radius:50%;background:var(--accent);color:#fff;font-size:14px;font-weight:800}
 .simple-grid{display:grid;gap:12px}
-.simple-grid-4{grid-template-columns:repeat(4,minmax(0,1fr))}
+.simple-grid-markets{grid-template-columns:repeat(auto-fit,minmax(170px,1fr))}
 .simple-grid-3{grid-template-columns:repeat(3,minmax(0,1fr))}
 .simple-card{position:relative;display:flex;flex-direction:column;align-items:flex-start;gap:6px;text-align:left;padding:16px;border:2px solid var(--border);border-radius:14px;background:var(--bg-1);color:var(--text-1);cursor:pointer;font:inherit;transition:transform .12s ease,border-color .12s ease,background .12s ease}
 .simple-card:hover:not(:disabled){transform:translateY(-2px);border-color:var(--border-light)}
@@ -210,5 +210,5 @@ body,[data-theme="light"] body{background:var(--bg-0);background-image:none}
 .simple-ranking th{text-align:left;font-size:11px;color:var(--text-3);font-weight:600;padding:6px 8px;border-bottom:1px solid var(--border)}
 .simple-ranking td{padding:9px 8px;border-bottom:1px solid var(--border);color:var(--text-1);white-space:nowrap}
 .simple-disclaimer{margin-top:22px;text-align:center;font-size:11px;color:var(--text-3)}
-@media(max-width:900px){.simple-grid-4{grid-template-columns:repeat(2,minmax(0,1fr))}.simple-grid-3{grid-template-columns:minmax(0,1fr)}.simple-card-strategy{min-height:0}}
+@media(max-width:900px){.simple-grid-markets{grid-template-columns:repeat(2,minmax(0,1fr))}.simple-grid-3{grid-template-columns:minmax(0,1fr)}.simple-card-strategy{min-height:0}}
 @media(max-width:600px){.simple-hero h1{font-size:24px}.simple-scores{grid-template-columns:minmax(0,1fr)}.simple-vs{text-align:center}.simple-facts{grid-template-columns:minmax(0,1fr)}.simple-ranking{overflow-x:auto}.simple-play{width:100%}.mode-switch button{padding:5px 9px}}

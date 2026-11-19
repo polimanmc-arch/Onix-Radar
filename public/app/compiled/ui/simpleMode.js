@@ -57,7 +57,7 @@ window.StockScannerUI = window.StockScannerUI || {};
     function SimpleMode({ notify }) {
         const C = core();
         const markets = C.SIMPLE_MARKETS, strategies = C.SIMPLE_STRATEGIES, periods = C.SIMPLE_PERIODS;
-        const [marketId, setMarketId] = useState(markets[0].id);
+        const [marketId, setMarketId] = useState('DOW30');
         const [strategyId, setStrategyId] = useState(null);
         const [years, setYears] = useState(3);
         const [running, setRunning] = useState(false);
@@ -98,18 +98,11 @@ window.StockScannerUI = window.StockScannerUI || {};
                     setError((out === null || out === void 0 ? void 0 : out.message) || 'No hubo datos suficientes para simular. Prueba con otro mercado.');
                     return;
                 }
-                setProgress({ pct: 97, label: 'Buscando señales de hoy' });
-                let rows = [];
-                const scanRef = { current: {} };
-                const tickers = (((_a = window.StockScannerConfig.UNIVERSE_PRESETS[market.preset]) === null || _a === void 0 ? void 0 : _a.tickers) || []);
-                await C.runScanWorkflow({
-                    scanning: false, tickers, filters: C.buildSimpleBacktestOptions({ market, strategy, period }).entryRules[0].conditions, shortFilters: [],
-                    scanDirection: 'long', conc: 12, minHistoryYears: 0, abortRef: { current: null }, dataCacheRef: scanRef,
-                    setScanning: () => { }, setSearch: () => { }, setOnlyPass: () => { }, setTab: () => { }, setProg: () => { },
-                    setResults: r => { rows = r; }, addLog: () => { }, fetchSectors: async () => ({}), fetchQuotes: async () => ({}), setSectorData: () => { },
-                }).catch(() => { });
-                const signals = rows.filter(r => r.passed && !r.err).map(r => ({ ticker: r.ticker, price: r.price, chg: r.chg })).slice(0, 18);
-                setOutcome({ summary, signals, market, strategy, period });
+                // Señales de hoy con los precios semanales ya descargados (sin otra descarga).
+                const tickers = ((_a = window.StockScannerConfig.UNIVERSE_PRESETS[market.preset]) === null || _a === void 0 ? void 0 : _a.tickers) || [];
+                const today = C.todaySimpleSignals({ dataByTicker: cacheRef.current, tickers, strategy });
+                const signals = today.list, signalsTotal = today.total;
+                setOutcome({ summary, signals, signalsTotal, market, strategy, period });
                 const game = { id: Date.now(), market: market.name, flag: market.flag, strategy: strategy.name, icon: strategy.icon, period: period.label, ret: summary.ret, benchRet: summary.benchRet, stars: summary.stars, currency: market.currency };
                 setGames(prev => { const next = [game, ...prev].slice(0, 30); saveGames(next); return next; });
                 setTimeout(() => { var _a, _b; return (_b = (_a = resultRef.current) === null || _a === void 0 ? void 0 : _a.scrollIntoView) === null || _b === void 0 ? void 0 : _b.call(_a, { behavior: 'smooth', block: 'start' }); }, 60);
@@ -141,7 +134,7 @@ window.StockScannerUI = window.StockScannerUI || {};
                 React.createElement("h2", { id: "simple-step-1" },
                     React.createElement("span", { className: "simple-step-n" }, "1"),
                     "Elige tu mercado"),
-                React.createElement("div", { className: "simple-grid simple-grid-4" }, markets.map(m => (React.createElement("button", { type: "button", key: m.id, className: "simple-card", "aria-pressed": m.id === marketId, onClick: () => setMarketId(m.id), disabled: running },
+                React.createElement("div", { className: "simple-grid simple-grid-markets" }, markets.map(m => (React.createElement("button", { type: "button", key: m.id, className: "simple-card", "aria-pressed": m.id === marketId, onClick: () => setMarketId(m.id), disabled: running },
                     React.createElement("span", { className: "simple-card-icon" }, m.flag),
                     React.createElement("strong", null, m.name),
                     React.createElement("span", null, m.blurb)))))),
@@ -205,11 +198,13 @@ window.StockScannerUI = window.StockScannerUI || {};
                     React.createElement("span", null, "\u2B50 ganar al mercado"),
                     React.createElement("span", null, "\u2B50 sufrir menos ca\u00EDda que el mercado")),
                 React.createElement("div", { className: "simple-signals" },
-                    React.createElement("h3", null, `📡 Hoy esta estrategia elegiría (${outcome.signals.length})`),
+                    React.createElement("h3", null, `📡 Hoy esta estrategia elegiría (${outcome.signalsTotal})`),
                     outcome.signals.length
-                        ? React.createElement("div", { className: "simple-chips" }, outcome.signals.map(x => React.createElement("span", { key: x.ticker, className: "simple-chip" },
-                            React.createElement("b", null, x.ticker),
-                            Number.isFinite(x.price) ? ` ${x.price.toFixed(2)}` : '')))
+                        ? React.createElement("div", { className: "simple-chips" },
+                            outcome.signals.map(x => React.createElement("span", { key: x.ticker, className: "simple-chip" },
+                                React.createElement("b", null, x.ticker),
+                                Number.isFinite(x.price) ? ` ${x.price.toFixed(2)}` : '')),
+                            outcome.signalsTotal > outcome.signals.length && React.createElement("span", { className: "simple-chip" }, `y ${outcome.signalsTotal - outcome.signals.length} más`))
                         : React.createElement("p", null, "Hoy ninguna acci\u00F3n de este mercado cumple las condiciones: la estrategia esperar\u00EDa.")),
                 React.createElement("button", { type: "button", className: "simple-link", "aria-expanded": howOpen, onClick: () => setHowOpen(v => !v) }, howOpen ? 'Ocultar cómo decide' : '¿Cómo decide esta estrategia?'),
                 howOpen && React.createElement("div", { className: "simple-how" },
