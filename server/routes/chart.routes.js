@@ -1,9 +1,34 @@
 const express = require('express');
+const zlib = require('zlib');
 const { getChart, getChartCacheStats } = require('../services/marketData.service');
 const { getDiskCacheStats, hasDiskCache, pruneDiskCache } = require('../utils/diskCache');
 const { hasCache } = require('../utils/cache');
 
 const router = express.Router();
+
+// Versión compacta de una serie de Yahoo: sólo fechas y precios (7 cifras significativas), sin
+// metadatos ni precio ajustado. Mismo formato, unas 3 veces más ligera.
+const sig = v => (v == null || !Number.isFinite(v) ? null : Number(v.toPrecision(7)));
+function compactChart(data){
+  const r = data?.chart?.result?.[0];
+  if(!r?.timestamp) return data;
+  const q = r.indicators?.quote?.[0] || {};
+  return { chart: { result: [{ timestamp: r.timestamp, indicators: { quote: [{
+    open: (q.open || []).map(sig), high: (q.high || []).map(sig), low: (q.low || []).map(sig), close: (q.close || []).map(sig), volume: q.volume || [],
+  }] } }] } };
+}
+
+// JSON comprimido con gzip si el navegador lo acepta (las respuestas de precios son grandes).
+function sendJson(req, res, payload){
+  const body = Buffer.from(JSON.stringify(payload));
+  res.set('Content-Type', 'application/json; charset=utf-8');
+  res.set('Vary', 'Accept-Encoding');
+  if(body.length > 2048 && /\bgzip\b/.test(String(req.headers['accept-encoding'] || ''))){
+    res.set('Content-Encoding', 'gzip');
+    return res.send(zlib.gzipSync(body, { level: 6 }));
+  }
+  return res.send(body);
+}
 
 router.get('/chart/:ticker', async (req, res) => {
   try {
@@ -25,6 +50,7 @@ router.post('/charts', async (req, res) => {
   const interval = String(req.body?.interval || '1wk');
   const range = String(req.body?.range || '2y');
   const concurrency = Math.max(1, Math.min(40, Number(req.body?.concurrency) || 18));
+  const compact = req.body?.compact === true;
 
   const results = {};
   for (let i = 0; i < symbols.length; i += concurrency) {
@@ -39,12 +65,12 @@ router.post('/charts', async (req, res) => {
     }));
     settled.forEach((item, idx) => {
       const ticker = batch[idx];
-      if (item.status === 'fulfilled') results[item.value[0]] = item.value[1];
+      if (item.status === 'fulfilled') results[item.value[0]] = compact ? compactChart(item.value[1]) : item.value[1];
       else results[ticker] = { chart: { result: [] }, error: item.reason?.message || 'Error', ok: false };
     });
   }
 
-  res.json({ ok: true, count: symbols.length, results });
+  sendJson(req, res, { ok: true, count: symbols.length, results });
 });
 
 router.post('/charts/cache/check', async (req, res) => {

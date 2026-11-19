@@ -126,3 +126,25 @@ test('the S&P 500 market filter can be switched off on the base strategy and on 
   assert.equal(o.mktFilterEnabled,true); assert.equal(o.mktRegimeTicker,'SPY');
   assert.equal(c.simpleWithMarketFilter(on,false),trend);
 });
+
+test('weekly prices: compact parallel batches and no ticker is downloaded twice when a prefetch is running',async()=>{
+  const ctx=vm.createContext({window:{},console});
+  vm.runInContext(fs.readFileSync(path.join(root,'public/app/core/simpleSimulator.js'),'utf8'),ctx);
+  const c=ctx.window.StockScannerCore;
+  const asked=[]; let open=0, maxOpen=0;
+  const now=Math.floor(Date.now()/1000);
+  const chart=()=>({chart:{result:[{timestamp:Array.from({length:30},(_,i)=>now-(29-i)*604800),indicators:{quote:[{open:Array(30).fill(10),high:Array(30).fill(11),low:Array(30).fill(9),close:Array(30).fill(10),volume:Array(30).fill(1)}]}}]}});
+  const fetchImpl=async(url,opts)=>{ const body=JSON.parse(opts.body); asked.push(...body.symbols); assert.equal(body.compact,true);
+    open++; maxOpen=Math.max(maxOpen,open); await new Promise(r=>setTimeout(r,15)); open--;
+    return {json:async()=>({results:Object.fromEntries(body.symbols.map(s=>[s,chart()]))})}; };
+  const tickers=Array.from({length:450},(_,i)=>'T'+i);
+  const cacheRef={current:{}}; const seen=[];
+  const pre=c.loadSimpleWeekly({tickers,cacheRef,fetchImpl});
+  await c.loadSimpleWeekly({tickers:[...tickers,'EXTRA'],cacheRef,fetchImpl,onProgress:(d,t)=>seen.push([d,t])});
+  await pre;
+  assert.equal(asked.length,451,'each ticker requested once');
+  assert.equal(new Set(asked).size,451);
+  assert.ok(maxOpen>1&&maxOpen<=6,'batches run in parallel (max '+maxOpen+')');
+  assert.ok(cacheRef.current.T0['1wk'].ok&&cacheRef.current.EXTRA['1wk'].ok);
+  assert.deepEqual(seen[seen.length-1],[451,451],'progress reaches the total');
+});

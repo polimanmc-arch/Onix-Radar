@@ -258,26 +258,56 @@
 
   // Descarga una sola vez los precios semanales del mercado (por lotes) y los deja en la caché que
   // después usan el portafolio y el backtest.
+  const inflightWeekly = new Map(); // descargas de precios semanales en curso, por acción y rango
   async function loadWeekly({ tickers, cacheRef, onProgress, signal, range = null, fetchImpl = (u, o) => fetch(u, o) }){
     const tf = (window.StockScannerConfig?.TIMEFRAMES || []).find(t => t.id === '1wk') || { yahooInterval: '1wk', yahooRange: '5y' };
     const want = range || tf.yahooRange;
     // Falta si no hay datos o si se descargaron con menos años de los que se piden ahora.
     // (Datos sin marca de rango con más de ~5,5 años de velas ya cubren los 10 años pedidos.)
     const yearsOf = d => RANGE_YEARS[d.range] || (d.closes.length > 290 ? 10 : 5);
-    const missing = tickers.filter(t => { const d = cacheRef.current?.[t]?.['1wk']; return !d?.ok || yearsOf(d) < (RANGE_YEARS[want] || 5); });
-    const size = 100;
-    for(let i = 0; i < missing.length; i += size){
-      if(signal?.aborted){ const e = new Error('Cancelado'); e.name = 'AbortError'; throw e; }
-      const batch = missing.slice(i, i + size);
+    const missing = [...new Set(tickers)].filter(t => { const d = cacheRef.current?.[t]?.['1wk']; return !d?.ok || yearsOf(d) < (RANGE_YEARS[want] || 5); });
+    if(!missing.length) return;
+    // Las acciones que ya se están descargando (p. ej. la precarga al elegir el mercado) no se piden dos veces.
+    const waiting = new Map(), toFetch = [];
+    missing.forEach(t => { const p = inflightWeekly.get(t + '|' + want); if(p) waiting.set(p, (waiting.get(p) || 0) + 1); else toFetch.push(t); });
+    let done = 0;
+    const report = n => { done += n; if(typeof onProgress === 'function') onProgress(Math.min(missing.length, done), missing.length); };
+    const aborted = () => { if(signal?.aborted){ const e = new Error('Cancelado'); e.name = 'AbortError'; throw e; } };
+    const size = 100, parallel = 3;
+    const batches = [];
+    for(let i = 0; i < toFetch.length; i += size) batches.push(toFetch.slice(i, i + size));
+    const fetchBatch = async batch => {
       const res = await fetchImpl('/api/charts', { method: 'POST', headers: { 'Content-Type': 'application/json' }, signal,
-        body: JSON.stringify({ symbols: batch, interval: tf.yahooInterval, range: want, concurrency: 18 }) });
+        body: JSON.stringify({ symbols: batch, interval: tf.yahooInterval, range: want, concurrency: 12, compact: true }) });
       const json = await res.json().catch(() => ({}));
       for(const t of batch){
         const parsed = { ...parseChart(t, json?.results?.[t]), range: want };
         cacheRef.current[t] = { ...(cacheRef.current[t] || {}), '1wk': parsed };
       }
-      if(typeof onProgress === 'function') onProgress(Math.min(missing.length, i + size), missing.length);
-    }
+    };
+    // Una promesa por lote, registrada antes de empezar para que otras llamadas la esperen.
+    const slots = batches.map(batch => {
+      let resolve, reject; const promise = new Promise((a, b) => { resolve = a; reject = b; }); promise.catch(() => {});
+      batch.forEach(t => inflightWeekly.set(t + '|' + want, promise));
+      return { promise, resolve, reject };
+    });
+    const cleanup = k => batches[k].forEach(t => { if(inflightWeekly.get(t + '|' + want) === slots[k].promise) inflightWeekly.delete(t + '|' + want); });
+    let next = 0;
+    // Hasta 3 lotes a la vez.
+    const worker = async () => {
+      while(next < batches.length){
+        const k = next++;
+        try{ aborted(); await fetchBatch(batches[k]); slots[k].resolve(); }
+        catch(e){
+          for(let j = k; j < batches.length; j++){ if(j === k || j >= next){ slots[j].reject(e); cleanup(j); } }
+          next = batches.length; throw e;
+        }
+        cleanup(k); report(batches[k].length);
+      }
+    };
+    const own = Promise.all(Array.from({ length: Math.min(parallel, batches.length) }, worker));
+    const others = Promise.all([...waiting].map(([p, count]) => p.catch(() => {}).then(() => report(count))));
+    await Promise.all([own, others]);
   }
 
   function sharpe52(closes){

@@ -322,6 +322,23 @@ window.StockScannerUI = window.StockScannerUI || {};
 
     const market = markets.find(m => m.id === marketId);
     const group = groups.find(g => g.id === market?.group) || groups[0];
+    // Precarga: al elegir un mercado (y al entrar, con el S&P 500) se empiezan a descargar sus precios
+    // semanales en segundo plano; el escáner reutiliza esa descarga y suele empezar con todo listo.
+    const [prefetch, setPrefetch] = useState({ id: null, state: 'idle' });
+    useEffect(() => {
+      const mk = markets.find(m => m.id === marketId);
+      if(!mk || mk.heavy) return undefined;
+      let alive = true;
+      const timer = setTimeout(async () => {
+        setPrefetch({ id: mk.id, state: 'loading' });
+        try{
+          const list = await C.resolveSimpleUniverse(mk);
+          await C.loadSimpleWeekly({ tickers: [...list, mk.benchmark, 'SPY'], cacheRef });
+          if(alive) setPrefetch({ id: mk.id, state: 'ready' });
+        }catch{ if(alive) setPrefetch({ id: mk.id, state: 'idle' }); }
+      }, 350);
+      return () => { alive = false; clearTimeout(timer); };
+    }, [marketId]);
     const countOf = m => C.simpleUniverseReady(m) ? C.simpleUniverseTickers(m).length.toLocaleString('es-ES') : '≈' + (m.approx || 0).toLocaleString('es-ES');
     // Filtro del S&P 500: activado de serie en la estrategia base; se puede poner o quitar en cualquiera.
     const [mktFilter, setMktFilter] = useState({});
@@ -485,6 +502,7 @@ window.StockScannerUI = window.StockScannerUI || {};
     return (
       <div className="simple-mode">
         <section className="simple-hero">
+          <span className="simple-byline">Creado por <b>Diego Santos</b></span>
           <h1>Radar Onix · Simulador de inversión</h1>
           <p>Del escáner al portafolio: elige un mercado y una estrategia y sigue el proceso completo con datos reales.</p>
         </section>
@@ -521,7 +539,8 @@ window.StockScannerUI = window.StockScannerUI || {};
                 </button>
               ))}
             </div>
-            <p className="simple-note">{`Universo: ${countOf(market)} activos · comparado con comprar ${market.holdLabel}${market.heavy ? ' · la primera carga puede tardar 1-2 minutos' : ''}${market.note ? ' · ' + market.note : ''}`}</p>
+            <p className="simple-note">{`Universo: ${countOf(market)} activos · comparado con comprar ${market.holdLabel}${market.heavy ? ' · la primera carga puede tardar 1-2 minutos' : ''}${market.note ? ' · ' + market.note : ''}`}
+              {prefetch.id === market.id && prefetch.state !== 'idle' && <span className={'simple-prefetch ' + prefetch.state}>{prefetch.state === 'ready' ? ' · ⚡ precios listos' : ' · descargando precios…'}</span>}</p>
           </section>
           <section className="simple-step" aria-labelledby="simple-step-strategy">
             <h2 id="simple-step-strategy"><span className={'simple-step-n' + (strategy ? ' done' : '')}>2</span>Estrategia</h2>
@@ -722,7 +741,7 @@ window.StockScannerUI = window.StockScannerUI || {};
           {rankMsg && <p className="simple-note" role="status">{rankMsg}</p>}
         </section>}
 
-        <p className="simple-disclaimer">Datos reales de Yahoo Finance. Rentabilidades pasadas no garantizan resultados futuros; es una herramienta educativa, no una recomendación de inversión.</p>
+        <p className="simple-disclaimer">Radar Onix · creado por Diego Santos. Datos reales de Yahoo Finance. Rentabilidades pasadas no garantizan resultados futuros; es una herramienta educativa, no una recomendación de inversión.</p>
       </div>
     );
   }

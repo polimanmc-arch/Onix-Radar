@@ -541,3 +541,10 @@ label.simple-capital em{font-style:normal;font-weight:700;color:var(--text-1)}
 .simple-rerun>span{flex:1 1 220px;color:var(--text-2)}
 .simple-rerun.changed{border-color:var(--accent);background:var(--accent-dim)}
 .simple-rerun.changed>span{color:var(--text-0);font-weight:600}
+/* Autor y precarga de precios */
+.simple-byline{display:inline-flex;align-items:center;gap:6px;margin-bottom:12px;padding:5px 14px;border:1px solid var(--border);border-radius:999px;background:var(--bg-1);font-size:13px;color:var(--text-2)}
+.simple-byline::before{content:'';width:7px;height:7px;border-radius:50%;background:var(--accent)}
+.simple-byline b{color:var(--text-0);font-weight:700}
+[data-theme="light"] .simple-byline{background:#fff;border-color:rgba(13,13,13,.1);box-shadow:0 12px 30px -18px rgba(13,13,13,.45)}
+.simple-prefetch{color:var(--text-3)}
+.simple-prefetch.ready{color:var(--green);font-weight:600}

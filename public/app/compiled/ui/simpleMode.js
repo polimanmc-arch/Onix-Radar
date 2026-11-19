@@ -334,6 +334,29 @@ window.StockScannerUI = window.StockScannerUI || {};
         }, [startedAt]);
         const market = markets.find(m => m.id === marketId);
         const group = groups.find(g => g.id === (market === null || market === void 0 ? void 0 : market.group)) || groups[0];
+        // Precarga: al elegir un mercado (y al entrar, con el S&P 500) se empiezan a descargar sus precios
+        // semanales en segundo plano; el escáner reutiliza esa descarga y suele empezar con todo listo.
+        const [prefetch, setPrefetch] = useState({ id: null, state: 'idle' });
+        useEffect(() => {
+            const mk = markets.find(m => m.id === marketId);
+            if (!mk || mk.heavy)
+                return undefined;
+            let alive = true;
+            const timer = setTimeout(async () => {
+                setPrefetch({ id: mk.id, state: 'loading' });
+                try {
+                    const list = await C.resolveSimpleUniverse(mk);
+                    await C.loadSimpleWeekly({ tickers: [...list, mk.benchmark, 'SPY'], cacheRef });
+                    if (alive)
+                        setPrefetch({ id: mk.id, state: 'ready' });
+                }
+                catch {
+                    if (alive)
+                        setPrefetch({ id: mk.id, state: 'idle' });
+                }
+            }, 350);
+            return () => { alive = false; clearTimeout(timer); };
+        }, [marketId]);
         const countOf = m => C.simpleUniverseReady(m) ? C.simpleUniverseTickers(m).length.toLocaleString('es-ES') : '≈' + (m.approx || 0).toLocaleString('es-ES');
         // Filtro del S&P 500: activado de serie en la estrategia base; se puede poner o quitar en cualquiera.
         const [mktFilter, setMktFilter] = useState({});
@@ -559,6 +582,9 @@ window.StockScannerUI = window.StockScannerUI || {};
         const fmtCol = (v, fmt) => fmt === 'pct' ? pct(v) : fmt === 'num' ? num(v, 1) : (v !== null && v !== void 0 ? v : '—');
         return (React.createElement("div", { className: "simple-mode" },
             React.createElement("section", { className: "simple-hero" },
+                React.createElement("span", { className: "simple-byline" },
+                    "Creado por ",
+                    React.createElement("b", null, "Diego Santos")),
                 React.createElement("h1", null, "Radar Onix \u00B7 Simulador de inversi\u00F3n"),
                 React.createElement("p", null, "Del esc\u00E1ner al portafolio: elige un mercado y una estrategia y sigue el proceso completo con datos reales.")),
             React.createElement("ol", { className: "simple-pipeline simple-path", "aria-label": "Camino del an\u00E1lisis" }, path.map(s => (React.createElement("li", { key: s.id, "data-state": s.state },
@@ -584,7 +610,9 @@ window.StockScannerUI = window.StockScannerUI || {};
                     React.createElement("div", { className: "simple-options", role: "group", "aria-label": `Universo de ${group.name}` }, group.options.map(o => (React.createElement("button", { type: "button", key: o.id, "aria-pressed": o.id === marketId, disabled: running, onClick: () => setMarketId(o.id), title: o.heavy ? 'Más de 1.000 activos: la primera carga puede tardar 1-2 minutos' : undefined },
                         o.name,
                         React.createElement("small", null, countOf(o)))))),
-                    React.createElement("p", { className: "simple-note" }, `Universo: ${countOf(market)} activos · comparado con comprar ${market.holdLabel}${market.heavy ? ' · la primera carga puede tardar 1-2 minutos' : ''}${market.note ? ' · ' + market.note : ''}`)),
+                    React.createElement("p", { className: "simple-note" },
+                        `Universo: ${countOf(market)} activos · comparado con comprar ${market.holdLabel}${market.heavy ? ' · la primera carga puede tardar 1-2 minutos' : ''}${market.note ? ' · ' + market.note : ''}`,
+                        prefetch.id === market.id && prefetch.state !== 'idle' && React.createElement("span", { className: 'simple-prefetch ' + prefetch.state }, prefetch.state === 'ready' ? ' · ⚡ precios listos' : ' · descargando precios…'))),
                 React.createElement("section", { className: "simple-step", "aria-labelledby": "simple-step-strategy" },
                     React.createElement("h2", { id: "simple-step-strategy" },
                         React.createElement("span", { className: 'simple-step-n' + (strategy ? ' done' : '') }, "2"),
@@ -842,7 +870,7 @@ window.StockScannerUI = window.StockScannerUI || {};
                             ? React.createElement("button", { type: "button", className: "simple-view", onClick: () => openGame(g), disabled: running, "aria-label": `Ver la partida ${g.strategy} en ${g.market}` }, "Ver \u25B8")
                             : React.createElement("span", { className: "simple-view-na", title: "Partida anterior a esta opci\u00F3n: no se guardaron los detalles" }, "\u2014"))))))),
                 rankMsg && React.createElement("p", { className: "simple-note", role: "status" }, rankMsg)),
-            React.createElement("p", { className: "simple-disclaimer" }, "Datos reales de Yahoo Finance. Rentabilidades pasadas no garantizan resultados futuros; es una herramienta educativa, no una recomendaci\u00F3n de inversi\u00F3n.")));
+            React.createElement("p", { className: "simple-disclaimer" }, "Radar Onix \u00B7 creado por Diego Santos. Datos reales de Yahoo Finance. Rentabilidades pasadas no garantizan resultados futuros; es una herramienta educativa, no una recomendaci\u00F3n de inversi\u00F3n.")));
     }
     window.StockScannerUI.SimpleMode = SimpleMode;
 })();
