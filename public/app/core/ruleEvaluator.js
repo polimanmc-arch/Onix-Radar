@@ -203,14 +203,15 @@
         const pctVal=v=>{ const n=Number(v); return Number.isFinite(n)?(Math.abs(n)<=1?n*100:n):null; };
         const numVal=v=>{ const n=Number(v); return Number.isFinite(n)?n:null; };
         const txtVal=v=>v==null?null:String(v).trim()||null;
+        const millVal=v=>{ const n=numVal(v); return n==null?null:n/1e6; };
         switch(id){
           case 'SECTOR': return txtVal(meta.sector);
           case 'INDUSTRY': return txtVal(meta.industry);
           case 'COUNTRY': return txtVal(meta.country);
           case 'EXCHANGE': return txtVal(meta.exchange);
-          case 'MARKET_CAP': return numVal(meta.marketCap);
-          case 'FLOAT': return numVal(meta.floatShares);
-          case 'SHARES_OUT': return numVal(meta.sharesOutstanding);
+          case 'MARKET_CAP': return millVal(meta.marketCap);
+          case 'FLOAT': return millVal(meta.floatShares);
+          case 'SHARES_OUT': return millVal(meta.sharesOutstanding);
           case 'SHORT_INT_PCT': return pctVal(meta.shortInterestPct);
           case 'INST_OWN_PCT': return pctVal(meta.institutionalOwnershipPct);
           case 'INSIDER_OWN_PCT': return pctVal(meta.insiderOwnershipPct);
@@ -283,7 +284,7 @@
         const meta=dataByTf?._meta||{};
         if(!d?.ok && !meta) return {pass:false,val:null,cmp:null};
         const [cur,prev]=evalIndAt(f.ind,f.params,d||{ok:false},idx,meta);
-        if(cur==null) return {pass:false,val:null,cmp:null};
+        if(cur==null) return f.ignoreMissing ? {pass:true,val:null,cmp:null,skipped:true} : {pass:false,val:null,cmp:null};
         if(['SECTOR','INDUSTRY','COUNTRY','EXCHANGE'].includes(f.ind)){
           const left=String(cur||'').trim().toLowerCase();
           const right=String(f.cmpVal??'').trim().toLowerCase();

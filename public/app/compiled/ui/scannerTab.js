@@ -10,9 +10,13 @@ window.StockScannerTabs = window.StockScannerTabs || {};
         "Precio y estructura": { icon: "PX", hint: "Precio, tendencia, rango y volatilidad base.", tint: "rgba(0,180,255,.12)", border: "rgba(0,180,255,.28)" },
         "Volumen y liquidez": { icon: "VOL", hint: "Actividad, participacion y liquidez operable.", tint: "rgba(34,197,94,.10)", border: "rgba(34,197,94,.24)" },
         "Calidad del movimiento": { icon: "MOM", hint: "Contexto del impulso y limpieza del movimiento.", tint: "rgba(245,158,11,.10)", border: "rgba(245,158,11,.24)" },
+        "Fundamentales": { icon: "FUN", hint: "Valoración, rentabilidad y crecimiento (dato actual de Yahoo).", tint: "rgba(168,85,247,.10)", border: "rgba(168,85,247,.24)" },
+        "Perfil y propiedad": { icon: "CIA", hint: "Tamaño, riesgo, propiedad y clasificación de la empresa (dato actual).", tint: "rgba(236,72,153,.08)", border: "rgba(236,72,153,.22)" },
         "Otros": { icon: "GEN", hint: "Indicadores adicionales.", tint: "rgba(148,163,184,.10)", border: "rgba(148,163,184,.24)" },
     };
-    const FILTER_CATEGORY_ORDER = ["Precio y estructura", "Volumen y liquidez", "Calidad del movimiento", "Otros"];
+    const FILTER_CATEGORY_ORDER = ["Precio y estructura", "Volumen y liquidez", "Calidad del movimiento", "Fundamentales", "Perfil y propiedad", "Otros"];
+    // Sectores tal como los devuelve Yahoo Finance (el filtro compara el texto sin distinguir mayúsculas).
+    const YAHOO_SECTORS = ["Basic Materials", "Communication Services", "Consumer Cyclical", "Consumer Defensive", "Energy", "Financial Services", "Healthcare", "Industrials", "Real Estate", "Technology", "Utilities"];
     const QUICK_FILTER_IDS = ["PRICE", "CHG", "GAP", "ATR", "RVOL", "DOLLAR_VOL", "AVG_VOL"];
     const FILTER_CATEGORY_COLLAPSE_KEY = 'onix_scanner_filter_category_collapse_v1';
     const SCANNER_CONFIG_OPEN_KEY = 'onix_scanner_config_open_v1';
@@ -27,7 +31,7 @@ window.StockScannerTabs = window.StockScannerTabs || {};
         const def = indicators.find(x => x.id === nid);
         return {
             _id: 'f_' + Math.random().toString(36).slice(2, 9),
-            tf: 'D',
+            tf: '1d',
             ind: nid,
             params: { p: (def === null || def === void 0 ? void 0 : def.param) || 14, ...(nid === 'STOCH' ? { ks: 1, dp: 3 } : {}), ...(nid === 'MACD' ? { sl: 26, sg: 9 } : {}) },
             op: (def === null || def === void 0 ? void 0 : def.metaType) === 'text' ? '>' : '>',
@@ -325,36 +329,51 @@ window.StockScannerTabs = window.StockScannerTabs || {};
         const indDef = INDICATORS.find(x => x.id === f.ind);
         const cmpIndDef = INDICATORS.find(x => x.id === f.cmpInd);
         const isTextMeta = ['SECTOR', 'INDUSTRY', 'COUNTRY', 'EXCHANGE'].includes(f.ind);
+        // Fundamentales y perfil: dato actual, sin temporalidad ni cruces ni comparación con la vela anterior.
+        const isMeta = !!(indDef === null || indDef === void 0 ? void 0 : indDef.meta);
         const supportsIgnoreMissing = !!(indDef === null || indDef === void 0 ? void 0 : indDef.supportsIgnoreMissing) && !isTextMeta;
         const visibleIndicators = (ctx.visibleIndicators || INDICATORS);
         const grouped = groupIndicators(visibleIndicators);
         const renderIndicatorOptions = () => grouped.map(([group, items]) => (React.createElement("optgroup", { key: group, label: group }, items.map(i => React.createElement("option", { key: i.id, value: i.id }, i.label)))));
         const onIndicatorChange = (nid) => {
             const def = INDICATORS.find(x => x.id === nid);
-            upF(f._id, { ind: nid, params: { p: (def === null || def === void 0 ? void 0 : def.param) || 14, ...(nid === 'STOCH' ? { ks: 1, dp: 3 } : {}), ...(nid === 'MACD' ? { sl: 26, sg: 9 } : {}) }, cmpType: (def === null || def === void 0 ? void 0 : def.metaType) === 'text' ? 'val' : f.cmpType, cmpVal: (def === null || def === void 0 ? void 0 : def.metaType) === 'text' ? (f.cmpVal || '') : (f.cmpVal || 0), ignoreMissing: !!(def === null || def === void 0 ? void 0 : def.supportsIgnoreMissing) }, side);
+            const meta = !!(def === null || def === void 0 ? void 0 : def.meta), text = (def === null || def === void 0 ? void 0 : def.metaType) === 'text';
+            const op = meta && !['>', '<', '>=', '<='].includes(f.op) ? '>' : f.op;
+            upF(f._id, { ind: nid, params: { p: (def === null || def === void 0 ? void 0 : def.param) || 14, ...(nid === 'STOCH' ? { ks: 1, dp: 3 } : {}), ...(nid === 'MACD' ? { sl: 26, sg: 9 } : {}) },
+                op: text ? (f.op === '<' ? '<' : '>') : op,
+                cmpType: (meta || text) ? 'val' : f.cmpType,
+                cmpVal: text ? '' : (meta ? (typeof f.cmpVal === 'number' ? f.cmpVal : 0) : (f.cmpVal || 0)),
+                ignoreMissing: !!(def === null || def === void 0 ? void 0 : def.supportsIgnoreMissing) }, side);
         };
         return (React.createElement("div", { key: f._id, style: { display: "flex", flexWrap: "wrap", gap: 5, alignItems: "center", padding: "8px 10px", background: "var(--panel-soft-bg)", border: "1px solid var(--panel-soft-border)", borderRadius: 5, marginBottom: 6 } },
             React.createElement("span", { style: { color: "var(--text-3)", fontSize: 8, fontWeight: 700, minWidth: 16 } },
                 "#",
                 idx + 1),
-            React.createElement("select", { value: f.tf, onChange: e => upF(f._id, { tf: e.target.value }, side), style: { ...S.inp, width: 90, fontWeight: 600, color: tfColor[f.tf] || "var(--accent)", borderColor: tfColor[f.tf] || "var(--border-light)" } }, TIMEFRAMES.map(t => React.createElement("option", { key: t.id, value: t.id }, t.label))),
+            isMeta
+                ? React.createElement("span", { title: "Dato actual de Yahoo Finance, no depende de la temporalidad", style: { ...S.inp, width: 90, display: 'inline-flex', alignItems: 'center', justifyContent: 'center', color: 'var(--text-2)', fontSize: 10 } }, "Dato actual")
+                : React.createElement("select", { value: f.tf, onChange: e => upF(f._id, { tf: e.target.value }, side), style: { ...S.inp, width: 90, fontWeight: 600, color: tfColor[f.tf] || "var(--accent)", borderColor: tfColor[f.tf] || "var(--border-light)" } }, TIMEFRAMES.map(t => React.createElement("option", { key: t.id, value: t.id }, t.label))),
             React.createElement("select", { value: f.ind, onChange: e => onIndicatorChange(e.target.value), style: { ...S.inp, maxWidth: 190 } }, renderIndicatorOptions()),
             ['STOCH', 'MACD'].includes(f.ind) && React.createElement(window.StockScannerUI.IndicatorParameters, { indicator: f.ind, params: f.params, onChange: params => upF(f._id, { params }, side) }),
             (indDef === null || indDef === void 0 ? void 0 : indDef.param) != null && f.ind !== "STOCH" && f.ind !== "MACD" && (React.createElement("input", { type: "number", className: "numeric-value-input", min: 1, max: 500, value: f.params.p, onChange: e => upF(f._id, { params: { ...f.params, p: +e.target.value || 1 } }, side), style: { ...S.inp, width: 56, textAlign: "center" }, title: "Per\u00EDodo" })),
             React.createElement("select", { value: f.op, onChange: e => upF(f._id, { op: e.target.value }, side), style: { ...S.inp, width: isTextMeta ? 78 : 60 } }, isTextMeta ? React.createElement(React.Fragment, null,
                 React.createElement("option", { value: ">" }, "Es"),
-                React.createElement("option", { value: "<" }, "No es")) : React.createElement(React.Fragment, null,
+                React.createElement("option", { value: "<" }, "No es")) : isMeta ? React.createElement(React.Fragment, null,
+                React.createElement("option", { value: ">" }, ">"),
+                React.createElement("option", { value: "<" }, "<"),
+                React.createElement("option", { value: ">=" }, "\u2265"),
+                React.createElement("option", { value: "<=" }, "\u2264")) : React.createElement(React.Fragment, null,
                 React.createElement("option", { value: ">" }, ">"),
                 React.createElement("option", { value: "<" }, "<"),
                 React.createElement("option", { value: ">=" }, "\u2265"),
                 React.createElement("option", { value: "<=" }, "\u2264"),
                 React.createElement("option", { value: "x_up" }, "Cruza\u2191"),
                 React.createElement("option", { value: "x_dn" }, "Cruza\u2193"))),
-            !isTextMeta && React.createElement("select", { value: f.cmpType, onChange: e => upF(f._id, { cmpType: e.target.value }, side), style: { ...S.inp, maxWidth: 125 } },
+            !isTextMeta && !isMeta && React.createElement("select", { value: f.cmpType, onChange: e => upF(f._id, { cmpType: e.target.value }, side), style: { ...S.inp, maxWidth: 125 } },
                 React.createElement("option", { value: "val" }, "Valor num\u00E9rico"),
                 React.createElement("option", { value: "prev" }, "Valor anterior"),
                 React.createElement("option", { value: "ind" }, "Otro indicador")),
-            (isTextMeta || f.cmpType === "val") && React.createElement("input", { type: isTextMeta ? "text" : "number", step: "any", value: f.cmpVal, onChange: e => upF(f._id, { cmpVal: isTextMeta ? e.target.value : (+e.target.value || 0) }, side), style: { ...S.inp, width: isTextMeta ? 130 : 70, textAlign: "center" }, placeholder: isTextMeta ? "Texto exacto" : "Valor" }),
+            (isTextMeta || isMeta || f.cmpType === "val") && React.createElement("input", { type: isTextMeta ? "text" : "number", step: "any", value: f.cmpVal, list: f.ind === 'SECTOR' ? 'onix-yahoo-sectors' : undefined, "aria-label": (indDef === null || indDef === void 0 ? void 0 : indDef.label) ? `Valor de ${indDef.label}` : 'Valor', onChange: e => upF(f._id, { cmpVal: isTextMeta ? e.target.value : (+e.target.value || 0) }, side), style: { ...S.inp, width: isTextMeta ? 150 : 80, textAlign: "center" }, placeholder: f.ind === 'SECTOR' ? "p. ej. Technology" : isTextMeta ? "Texto exacto" : "Valor" }),
+            f.ind === 'SECTOR' && React.createElement("datalist", { id: "onix-yahoo-sectors" }, YAHOO_SECTORS.map(x => React.createElement("option", { key: x, value: x }))),
             !isTextMeta && f.cmpType === "ind" && (React.createElement(React.Fragment, null,
                 React.createElement("select", { value: f.cmpInd, onChange: e => { const def = INDICATORS.find(x => x.id === e.target.value); upF(f._id, { cmpInd: e.target.value, cmpParams: { p: (def === null || def === void 0 ? void 0 : def.param) || 14 } }, side); }, style: { ...S.inp, maxWidth: 145 } }, renderIndicatorOptions()),
                 (cmpIndDef === null || cmpIndDef === void 0 ? void 0 : cmpIndDef.param) != null && (React.createElement("input", { type: "number", className: "numeric-value-input", min: 1, max: 500, value: f.cmpParams.p, onChange: e => upF(f._id, { cmpParams: { ...f.cmpParams, p: +e.target.value || 1 } }, side), style: { ...S.inp, width: 45, textAlign: "center" } })))),

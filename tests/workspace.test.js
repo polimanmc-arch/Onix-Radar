@@ -341,3 +341,22 @@ test('walk-forward panel runs from the current backtest rules and applies the la
   assert.equal(field==='p'?cond.params.p:field==='cmpVal'?cond.cmpVal:cond.cmpParams.p,chosen);
   await Renderer.act(async()=>tree.unmount());
 });
+
+test('fundamental filters can be chosen in the scanner and are not offered in backtest rules',async()=>{
+  const {tree}=await mountApp();
+  await Renderer.act(async()=>tree.root.find(n=>n.type==='button'&&n.children.join('')==='Universo y filtros').props.onClick());
+  const indicatorSelect=()=>tree.root.findAll(n=>n.type==='select'&&n.findAllByType('option').some(o=>o.props.value==='WMA')&&n.findAllByType('optgroup').length>0)[0];
+  const groups=indicatorSelect().findAllByType('optgroup').map(g=>g.props.label);
+  assert.ok(groups.includes('Fundamentales')&&groups.includes('Perfil y propiedad'),groups.join(','));
+  await Renderer.act(async()=>indicatorSelect().props.onChange({target:{value:'PE'}}));
+  const json=JSON.stringify(tree.toJSON());
+  assert.ok(json.includes('Dato actual'));
+  const valueInput=tree.root.findByProps({'aria-label':'Valor de PER (P/E)'});
+  const row=valueInput.parent;
+  const ops=row.findAllByType('select').flatMap(s=>s.findAllByType('option').map(o=>o.props.value));
+  assert.ok(!ops.includes('x_up')&&!ops.includes('prev'),'no crossings or previous-value comparison for fundamentals');
+  await Renderer.act(async()=>tree.root.findByProps({'aria-label':'Backtest'}).props.onClick());
+  const btOptions=tree.root.findAll(n=>n.type==='option').map(o=>o.props.value);
+  assert.ok(btOptions.includes('RSI')&&!btOptions.includes('PE'),'backtest rules exclude fundamentals');
+  await Renderer.act(async()=>tree.unmount());
+});

@@ -31,6 +31,35 @@ window.StockScannerConfig.INDICATORS = [
   {id:"EXT_EMA_PCT",label:"Extensión sobre EMA %",param:20,category:"Calidad del movimiento"},
   {id:"EXT_VWAP_PCT",label:"Extensión sobre VWAP %",param:null,category:"Calidad del movimiento"},
 
+  // Fundamentales: dato actual de Yahoo (no histórico). Sólo scanner y alertas.
+  {id:"PE",label:"PER (P/E)",param:null,category:"Fundamentales",meta:true,supportsIgnoreMissing:true},
+  {id:"FWD_PE",label:"PER estimado (forward)",param:null,category:"Fundamentales",meta:true,supportsIgnoreMissing:true},
+  {id:"PS",label:"Precio / Ventas",param:null,category:"Fundamentales",meta:true,supportsIgnoreMissing:true},
+  {id:"PB",label:"Precio / Valor contable",param:null,category:"Fundamentales",meta:true,supportsIgnoreMissing:true},
+  {id:"EV_EBITDA",label:"EV / EBITDA",param:null,category:"Fundamentales",meta:true,supportsIgnoreMissing:true},
+  {id:"DEBT_EQUITY",label:"Deuda / Patrimonio (%)",param:null,category:"Fundamentales",meta:true,supportsIgnoreMissing:true},
+  {id:"CURRENT_RATIO",label:"Ratio de liquidez",param:null,category:"Fundamentales",meta:true,supportsIgnoreMissing:true},
+  {id:"ROE",label:"ROE %",param:null,category:"Fundamentales",meta:true,supportsIgnoreMissing:true},
+  {id:"ROA",label:"ROA %",param:null,category:"Fundamentales",meta:true,supportsIgnoreMissing:true},
+  {id:"GROSS_MARGIN",label:"Margen bruto %",param:null,category:"Fundamentales",meta:true,supportsIgnoreMissing:true},
+  {id:"OPER_MARGIN",label:"Margen operativo %",param:null,category:"Fundamentales",meta:true,supportsIgnoreMissing:true},
+  {id:"REV_GROWTH",label:"Crecimiento de ingresos %",param:null,category:"Fundamentales",meta:true,supportsIgnoreMissing:true},
+  {id:"EPS_GROWTH",label:"Crecimiento de beneficios %",param:null,category:"Fundamentales",meta:true,supportsIgnoreMissing:true},
+  {id:"FCF_YIELD",label:"Rentabilidad flujo de caja libre %",param:null,category:"Fundamentales",meta:true,supportsIgnoreMissing:true},
+
+  // Perfil y propiedad
+  {id:"MARKET_CAP",label:"Capitalización (millones $)",param:null,category:"Perfil y propiedad",meta:true,supportsIgnoreMissing:true},
+  {id:"FLOAT",label:"Acciones en float (millones)",param:null,category:"Perfil y propiedad",meta:true,supportsIgnoreMissing:true},
+  {id:"SHARES_OUT",label:"Acciones en circulación (millones)",param:null,category:"Perfil y propiedad",meta:true,supportsIgnoreMissing:true},
+  {id:"BETA",label:"Beta",param:null,category:"Perfil y propiedad",meta:true,supportsIgnoreMissing:true},
+  {id:"SHORT_INT_PCT",label:"Posiciones cortas % del float",param:null,category:"Perfil y propiedad",meta:true,supportsIgnoreMissing:true},
+  {id:"INST_OWN_PCT",label:"Propiedad institucional %",param:null,category:"Perfil y propiedad",meta:true,supportsIgnoreMissing:true},
+  {id:"INSIDER_OWN_PCT",label:"Propiedad de directivos %",param:null,category:"Perfil y propiedad",meta:true,supportsIgnoreMissing:true},
+  {id:"SECTOR",label:"Sector",param:null,category:"Perfil y propiedad",meta:true,metaType:"text"},
+  {id:"INDUSTRY",label:"Industria",param:null,category:"Perfil y propiedad",meta:true,metaType:"text"},
+  {id:"COUNTRY",label:"País",param:null,category:"Perfil y propiedad",meta:true,metaType:"text"},
+  {id:"EXCHANGE",label:"Bolsa",param:null,category:"Perfil y propiedad",meta:true,metaType:"text"},
+
 ];
 window.StockScannerConfig.DIR_OPTIONS = [
   {id:"long",label:"Solo Long"},

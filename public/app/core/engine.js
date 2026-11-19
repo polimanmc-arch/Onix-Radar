@@ -35,6 +35,7 @@
   function buildAlignedSignalMap(dataByTf,anchorTime,startIdx=1){ const out={}; Object.entries(dataByTf||{}).forEach(([tf,d])=>{ if(tf !== '_meta') out[tf]=buildAlignedSignalSlice(d,anchorTime,startIdx); }); if(dataByTf?._meta) out._meta=dataByTf._meta; return out; }
 
   function num(v){ if(v==null||v===''||v==='-') return null; const n=Number(v); return Number.isFinite(n)?n:null; }
+  function mill(v){ const n=num(v); return n==null ? null : n/1e6; }
   function txt(v){ if(v==null) return null; const s=String(v).trim(); return s||null; }
   function pct(v){ const n=num(v); return n==null ? null : (Math.abs(n) <= 1 ? n*100 : n); }
   function avg(arr){return arr?.length?arr.reduce((a,b)=>a+b,0)/arr.length:null}
@@ -68,9 +69,10 @@
       case 'INDUSTRY': return txt(meta.industry);
       case 'COUNTRY': return txt(meta.country);
       case 'EXCHANGE': return txt(meta.exchange);
-      case 'MARKET_CAP': return num(meta.marketCap);
-      case 'FLOAT': return num(meta.floatShares);
-      case 'SHARES_OUT': return num(meta.sharesOutstanding);
+      // Cifras grandes en millones para que el umbral sea cómodo de escribir.
+      case 'MARKET_CAP': return mill(meta.marketCap);
+      case 'FLOAT': return mill(meta.floatShares);
+      case 'SHARES_OUT': return mill(meta.sharesOutstanding);
       case 'SHORT_INT_PCT': return pct(meta.shortInterestPct);
       case 'INST_OWN_PCT': return pct(meta.institutionalOwnershipPct);
       case 'INSIDER_OWN_PCT': return pct(meta.insiderOwnershipPct);
@@ -162,7 +164,8 @@
 
   function testFilter(f,d){
     const [cur,prev]=evalInd(f.ind,f.params,d);
-    if(cur==null) return {pass:false,val:null,cmp:null};
+    // "Ignorar faltantes": sin dato (p. ej. un ETF sin PER) el filtro no descarta el valor.
+    if(cur==null) return f.ignoreMissing ? {pass:true,val:null,cmp:null,skipped:true} : {pass:false,val:null,cmp:null};
 
     // textual metadata filters accept = and != semantics through >/< disabled; use cmpVal text.
     const textMode = ['SECTOR','INDUSTRY','COUNTRY','EXCHANGE'].includes(f.ind);

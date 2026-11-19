@@ -695,7 +695,7 @@ function renderRuleGroup(grp, gi, rules, setRules, accent, ctx){
               {TIMEFRAMES.map(t=><option key={t.id} value={t.id}>{t.id.toUpperCase()}</option>)}
             </select>
             <select value={c.ind} onChange={e=>{const def=INDICATORS.find(x=>x.id===e.target.value);upC({ind:e.target.value,params:{p:(def?.param)||14,...(e.target.value==="STOCH"?{ks:1,dp:3}:{}),...(e.target.value==="MACD"?{sl:26,sg:9}:{})}})}} style={{...S.inp,fontSize:8,maxWidth:130}}>
-              {INDICATORS.map(i=><option key={i.id} value={i.id}>{i.label}</option>)}
+              {INDICATORS.filter(i=>!i.meta).map(i=><option key={i.id} value={i.id}>{i.label}</option>)}
             </select>
             {['STOCH','MACD'].includes(c.ind)&&<window.StockScannerUI.IndicatorParameters indicator={c.ind} params={c.params} onChange={params=>upC({params})}/>}
             {indDef?.param!=null&&c.ind!=="STOCH"&&c.ind!=="MACD"&&(
@@ -711,7 +711,7 @@ function renderRuleGroup(grp, gi, rules, setRules, accent, ctx){
             {c.cmpType==="ind"&&(
               <React.Fragment>
                 <select value={c.cmpInd} onChange={e=>{const def=INDICATORS.find(x=>x.id===e.target.value);upC({cmpInd:e.target.value,cmpParams:{p:(def?.param)||14}})}} style={{...S.inp,maxWidth:100,fontSize:8}}>
-                  {INDICATORS.map(i=><option key={i.id} value={i.id}>{i.label}</option>)}
+                  {INDICATORS.filter(i=>!i.meta).map(i=><option key={i.id} value={i.id}>{i.label}</option>)}
                 </select>
                 {INDICATORS.find(x=>x.id===c.cmpInd)?.param!=null&&(
                   <input type="number" className="numeric-value-input" min={1} max={500} value={c.cmpParams.p} onChange={e=>upC({cmpParams:{...c.cmpParams,p:+e.target.value||1}})} style={{...S.inp,width:40,textAlign:"center",fontSize:8}}/>
