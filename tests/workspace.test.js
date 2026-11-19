@@ -424,6 +424,7 @@ test('simple mode: first visit opens the 3-step simulator, plays a game and can 
   for(const o of ['S&P 500','Dow Jones 30','Nasdaq 100','Russell 2000 (top 25)','Todas las americanas']) assert.ok(btn(o),o);
   assert.equal(tree.root.findByProps({'aria-label':'Ver el detalle de Estrategia base Radar Onix'}).type,'button');
   assert.ok(json().includes('Estocástico %K(1) < 20')&&json().includes('WMA 30'),'base strategy rules and indicators are readable');
+  assert.equal(tree.root.findAllByProps({className:'simple-rule'}).length,0,'dense rules live in the tooltip, not on the card');
   await Renderer.act(async()=>btn('Europa').props.onClick());
   assert.ok(btn('IBEX 35')&&btn('Toda Europa'));
   await Renderer.act(async()=>btn('Acciones de EE. UU.').props.onClick());
@@ -437,6 +438,11 @@ test('simple mode: first visit opens the 3-step simulator, plays a game and can 
   assert.equal(tree.root.findAllByProps({'aria-label':'Frontera eficiente de Markowitz con el portafolio elegido'}).length,1,'efficient frontier');
   assert.equal(tree.root.findAllByProps({'aria-label':'Resultado del backtest'}).length,1,'backtest section');
   assert.ok(json().includes('Peso por acción')&&json().includes('Peso por sector'));
+  assert.equal(tree.root.findAll(n=>n.type==='svg'&&String(n.props['aria-label']||'').startsWith('Peso por acción:')).length,1,'stock weights donut');
+  assert.equal(tree.root.findAll(n=>n.type==='svg'&&String(n.props['aria-label']||'').startsWith('Peso por sector:')).length,1,'sector weights donut');
+  assert.equal(tree.root.findAllByProps({className:'simple-candles'}).length,1,'candlestick chart beside the scanner table');
+  const rows=tree.root.findAll(n=>n.type==='tr'&&typeof n.props.onClick==='function');
+  if(rows.length>1){ await Renderer.act(async()=>{ rows[1].props.onClick(); }); assert.equal(tree.root.findAll(n=>n.type==='tr'&&n.props['aria-selected']===true).length,1,'one selected row'); }
   assert.ok(json().includes('Comprar el Dow Jones (DIA) y esperar')&&json().includes('Ratio de Sharpe'));
   assert.ok(json().includes('Precio > SMA(40)'),'the scanner shows the applied rules');
   assert.ok(tree.root.findAllByProps({className:'simple-stars'}).length>=1);

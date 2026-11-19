@@ -96,15 +96,69 @@ window.StockScannerUI = window.StockScannerUI || {};
     );
   }
 
-  function Bars({ items, color = 'var(--accent)' }){
-    const max = Math.max(...items.map(i => i.weight), 0.0001);
-    return <div className="simple-bars">{items.map(it => (
-      <div key={it.key} className="simple-bar-row">
-        <div className="simple-bar-label"><b>{it.label}</b>{it.sub && <small>{it.sub}</small>}</div>
-        <div className="simple-bar-track"><span style={{ width: (it.weight / max * 100) + '%', background: color }}/></div>
-        <div className="simple-bar-value">{pct(it.weight, 1, false)}{it.extra && <small>{it.extra}</small>}</div>
-      </div>
-    ))}</div>;
+  // Gráfico de velas semanales del valor seleccionado en el escáner (mismo motor que el inspector experto).
+  function SimpleCandles({ ticker, data, strategy, row, currency }){
+    const host = useRef(null);
+    const [ok, setOk] = useState(true);
+    useEffect(() => {
+      const renderer = window.StockScannerUI?.ChartRenderer;
+      if(!host.current || !data?.ok || !window.LightweightCharts || !renderer){ setOk(false); return; }
+      let chart = null, ro = null;
+      try{
+        const times = [...data.times].reverse();
+        const candles = times.map((time, i) => { const k = times.length - 1 - i;
+          return { time, open: data.opens?.[k] ?? data.closes[k], high: data.highs[k], low: data.lows[k], close: data.closes[k] }; });
+        chart = renderer.buildPriceChart(host.current, data, times, candles, {
+          activeFilters: strategy.entry, activeEntryRules: [], activeExitRules: [], chartTf: '1wk', backtestTrades: [],
+          showExitInfo: false, showVolume: true, showIndicators: true, setCrossInfo: () => {}, priceHeight: host.current.clientHeight || 340,
+        });
+        if(times.length > 104) chart.timeScale().setVisibleLogicalRange({ from: times.length - 104, to: times.length + 2 });
+        ro = new ResizeObserver(() => host.current && chart.applyOptions({ width: host.current.clientWidth, height: host.current.clientHeight || 340 }));
+        ro.observe(host.current);
+        setOk(true);
+      }catch(e){ console.warn('Onix modo simple:', e); setOk(false); }
+      return () => { ro?.disconnect(); renderer.disposeChart(chart); };
+    }, [ticker, data, strategy]);
+    const lines = (strategy.entry || []).flatMap(f => [f, f.cmpType === 'ind' ? { ind: f.cmpInd, params: f.cmpParams } : null])
+      .filter(f => f && ['WMA', 'SMA', 'EMA'].includes(f.ind)).map(f => `${f.ind}(${f.params.p})`);
+    return (
+      <figure className="simple-candles">
+        <figcaption className="simple-candles-head">
+          <div><strong>{ticker}</strong>{row && <span>{`${num(row.price)} ${currency}`}</span>}{row && <em className={row.chg >= 0 ? 'up' : 'down'}>{pct(row.chg)}</em>}</div>
+          <small>{`Velas semanales · últimos 2 años${lines.length ? ' · ' + [...new Set(lines)].join(', ') : ''}`}</small>
+        </figcaption>
+        <div ref={host} className="simple-candles-chart" role="img" aria-label={`Gráfico de velas semanales de ${ticker}`}/>
+        {!ok && <p className="simple-note">No hay gráfico disponible para este valor.</p>}
+      </figure>
+    );
+  }
+
+  // Gráfico de dona con leyenda: reparto del dinero por acción o por sector.
+  const DONUT_COLORS = ['#5b8cff', '#2ec4a6', '#f5a623', '#e8577c', '#9b6dff', '#3fb8e6', '#8bc34a', '#ff7a45', '#d4b106', '#c06fd6', '#4dd0a0', '#ef6461'];
+  function Donut({ items, title, center, currency, wide }){
+    const R = 70, SW = 26, CIRC = 2 * Math.PI * R;
+    const total = items.reduce((t, i) => t + i.weight, 0) || 1;
+    let acc = 0;
+    const slices = items.map((it, i) => { const frac = it.weight / total, sl = { ...it, frac, off: acc, color: it.color || DONUT_COLORS[i % DONUT_COLORS.length] }; acc += frac; return sl; });
+    return (
+      <figure className={'simple-donut' + (wide ? ' wide' : '')}>
+        <h3>{title}</h3>
+        <div className="simple-donut-body">
+          <svg viewBox="0 0 200 200" role="img" aria-label={`${title}: ` + slices.map(sl => `${sl.label} ${pct(sl.weight, 1, false)}`).join(', ')}>
+            <circle cx="100" cy="100" r={R} fill="none" stroke="var(--bg-3)" strokeWidth={SW}/>
+            {slices.map(sl => <circle key={sl.key} cx="100" cy="100" r={R} fill="none" stroke={sl.color} strokeWidth={SW}
+              strokeDasharray={`${Math.max(0, sl.frac * CIRC - (slices.length > 1 ? 1.5 : 0))} ${CIRC}`} strokeDashoffset={-sl.off * CIRC}
+              transform="rotate(-90 100 100)"><title>{`${sl.label}: ${pct(sl.weight, 1, false)}`}</title></circle>)}
+            <text x="100" y="98" textAnchor="middle" fontSize="30" fontWeight="800" fill="var(--text-0)">{center.value}</text>
+            <text x="100" y="120" textAnchor="middle" fontSize="13" fill="var(--text-2)">{center.label}</text>
+          </svg>
+          <ul className="simple-donut-legend">{slices.map(sl => (
+            <li key={sl.key}><i style={{ background: sl.color }}/><span><b>{sl.label}</b>{sl.sub && <small>{sl.sub}</small>}</span>
+              <strong>{pct(sl.weight, 1, false)}{currency && <small>{money(sl.weight * 10000, currency)}</small>}</strong></li>
+          ))}</ul>
+        </div>
+      </figure>
+    );
   }
 
   const STAGES = [ { id: 'scan', label: 'Escáner' }, { id: 'portfolio', label: 'Portafolio Markowitz' }, { id: 'backtest', label: 'Backtest' } ];
@@ -115,6 +169,7 @@ window.StockScannerUI = window.StockScannerUI || {};
     const [marketId, setMarketId] = useState('DOW30');
     const [strategyId, setStrategyId] = useState('base');
     const [tipOpen, setTipOpen] = useState(null);
+    const [selTicker, setSelTicker] = useState(null);
     const [years, setYears] = useState(3);
     const [stage, setStage] = useState('idle');
     const [progress, setProgress] = useState('');
@@ -138,7 +193,7 @@ window.StockScannerUI = window.StockScannerUI || {};
       if(!ready) return;
       const ac = new AbortController(); abortRef.current = ac;
       const cfg = { market, strategy, period };
-      setError(null); setRun({ ...cfg });
+      setError(null); setRun({ ...cfg }); setSelTicker(null);
       setTimeout(() => sectionRef.current?.scrollIntoView?.({ behavior: 'smooth', block: 'start' }), 60);
       try{
         // 1. Escáner
@@ -191,6 +246,7 @@ window.StockScannerUI = window.StockScannerUI || {};
     const cur = run?.market?.currency;
     const scan = run?.scan, pf = run?.portfolio, bt = run?.backtest;
     const inPortfolio = new Set((pf?.allocations || []).map(a => a.ticker));
+    const selected = scan?.passing.some(r => r.ticker === selTicker) ? selTicker : scan?.passing[0]?.ticker;
     const fmtCol = (v, fmt) => fmt === 'pct' ? pct(v) : fmt === 'num' ? num(v, 1) : (v ?? '—');
 
     return (
@@ -229,8 +285,6 @@ window.StockScannerUI = window.StockScannerUI || {};
                   <button type="button" className="simple-card simple-card-strategy" aria-pressed={st.id === strategyId} onClick={() => setStrategyId(st.id)} disabled={running}>
                     <span className="simple-card-icon">{st.icon}</span><strong>{st.name}</strong><span>{st.pitch}</span>
                     <span className="simple-ind-list" aria-label="Indicadores">{st.indicators.map(i => <i key={i.name}>{i.name}</i>)}<i className="tf">Velas semanales</i></span>
-                    <span className="simple-rule"><b>Compra:</b> {st.buy}</span>
-                    <span className="simple-rule"><b>Vende:</b> {st.sell}</span>
                     <em className="simple-badge">{st.isBase ? '★ Base · ' + st.level : st.level}</em>
                   </button>
                   <div className={'simple-tip' + (tipOpen === st.id ? ' open' : '')} onMouseLeave={() => setTipOpen(t => t === st.id ? null : t)}>
@@ -238,6 +292,7 @@ window.StockScannerUI = window.StockScannerUI || {};
                       onClick={() => setTipOpen(t => t === st.id ? null : st.id)}>i</button>
                     <div className="simple-tip-pop" role="tooltip">
                       <strong>{`${st.icon} ${st.name}`}</strong>
+                      <div className="simple-tip-sec simple-tip-plain"><p><b>Compra:</b> {st.buy}</p><p><b>Vende:</b> {st.sell}</p></div>
                       <div className="simple-tip-sec"><b>Compra cuando se cumplen todas:</b><ul>{st.rulesBuy.map(r => <li key={r}>{r}</li>)}</ul></div>
                       <div className="simple-tip-sec"><b>Vende cuando:</b><ul>{st.rulesSell.map(r => <li key={r}>{r}</li>)}</ul></div>
                       <div className="simple-tip-sec"><b>Indicadores (velas semanales):</b><ul>{st.indicators.map(i => <li key={i.name}><b>{i.name}:</b> {i.what}</li>)}</ul></div>
@@ -281,19 +336,25 @@ window.StockScannerUI = window.StockScannerUI || {};
               <div><span>Cumplen la estrategia</span><strong>{scan.passing.length}</strong></div>
               <div><span>Del mercado</span><strong>{scan.analyzed ? pct(scan.passing.length / scan.analyzed, 0, false) : '—'}</strong></div>
             </div>
-            {scan.passing.length ? <div className="simple-table-wrap"><table className="simple-table">
-              <thead><tr><th>#</th><th>Acción</th><th>Precio</th><th>Última semana</th>
-                {run.strategy.columns.map(col => <th key={col.label} title={col.hint}>{col.label}</th>)}
-                <th title="Rentabilidad por unidad de riesgo en el último año">Sharpe 1 año</th><th/></tr></thead>
-              <tbody>{scan.passing.slice(0, 12).map((r, i) => (
-                <tr key={r.ticker}>
-                  <td>{i + 1}</td><td><b>{r.ticker}</b></td><td>{num(r.price)}</td>
-                  <td className={r.chg >= 0 ? 'up' : 'down'}>{pct(r.chg)}</td>
-                  {r.values.map((v, k) => <td key={k}>{fmtCol(v, run.strategy.columns[k].fmt)}</td>)}
-                  <td>{num(r.sharpe1y)}</td>
-                  <td>{inPortfolio.has(r.ticker) && <span className="simple-tag">En cartera</span>}</td>
-                </tr>))}</tbody>
-            </table>{scan.passing.length > 12 && <p className="simple-note">{`Y ${scan.passing.length - 12} acciones más. Las ${Math.min(scan.passing.length, C.SIMPLE_CANDIDATES)} con mejor Sharpe del último año pasan al optimizador.`}</p>}</div>
+            {scan.passing.length ? <div className="simple-scan-grid">
+              <div className="simple-table-wrap"><table className="simple-table simple-table-pick">
+                <thead><tr><th>#</th><th>Acción</th><th>Precio</th><th>Semana</th>
+                  {run.strategy.columns.map(col => <th key={col.label} title={col.hint}>{col.label}</th>)}
+                  <th title="Rentabilidad por unidad de riesgo en el último año">Sharpe 1a</th><th/></tr></thead>
+                <tbody>{scan.passing.slice(0, 12).map((r, i) => (
+                  <tr key={r.ticker} tabIndex={0} aria-selected={r.ticker === selected} className={r.ticker === selected ? 'sel' : ''}
+                    onClick={() => setSelTicker(r.ticker)} onKeyDown={e => { if(e.key === 'Enter' || e.key === ' '){ e.preventDefault(); setSelTicker(r.ticker); } }}>
+                    <td>{i + 1}</td><td><b>{r.ticker}</b></td><td>{num(r.price)}</td>
+                    <td className={r.chg >= 0 ? 'up' : 'down'}>{pct(r.chg)}</td>
+                    {r.values.map((v, k) => <td key={k}>{fmtCol(v, run.strategy.columns[k].fmt)}</td>)}
+                    <td>{num(r.sharpe1y)}</td>
+                    <td>{inPortfolio.has(r.ticker) && <span className="simple-tag">En cartera</span>}</td>
+                  </tr>))}</tbody>
+              </table>
+              <p className="simple-note">{`Haz clic en una fila para ver su gráfico.${scan.passing.length > 12 ? ` Y ${scan.passing.length - 12} acciones más.` : ''} Las ${Math.min(scan.passing.length, C.SIMPLE_CANDIDATES)} con mejor Sharpe del último año pasan al optimizador.`}</p></div>
+              {selected && <SimpleCandles ticker={selected} data={cacheRef.current[selected]?.['1wk']} strategy={run.strategy} currency={cur}
+                row={scan.passing.find(r => r.ticker === selected)}/>}
+            </div>
               : <p className="simple-note">Hoy ninguna acción del mercado cumple las reglas: la estrategia esperaría.</p>}
           </section>}
 
@@ -311,18 +372,15 @@ window.StockScannerUI = window.StockScannerUI || {};
             </div>
             <div className="simple-portfolio-grid">
               <FrontierChart portfolio={pf}/>
-              <div>
-                <h3>Peso por acción</h3>
-                <Bars items={(() => {
-                  const items = pf.allocations.map(a => ({ key: a.ticker, label: a.ticker, sub: a.shortName && a.shortName !== a.ticker ? a.shortName : sectorEs(a.sector), weight: Math.abs(a.weight), extra: money(Math.abs(a.weight) * 10000, cur) }));
+              <Donut title="Peso por acción" currency={cur} center={{ value: String(pf.allocations.length), label: 'acciones' }} items={(() => {
+                  const items = pf.allocations.map(a => ({ key: a.ticker, label: a.ticker, sub: a.shortName && a.shortName !== a.ticker ? a.shortName : sectorEs(a.sector), weight: Math.abs(a.weight) }));
                   const cash = 1 - items.reduce((t, i) => t + i.weight, 0);
                   // Con pocas acciones, el límite de 25 % por acción deja parte en efectivo.
-                  if(cash > 0.01) items.push({ key: 'cash', label: 'Efectivo', sub: 'por el límite de 25 % por acción', weight: cash, extra: money(cash * 10000, cur) });
+                  if(cash > 0.01) items.push({ key: 'cash', label: 'Efectivo', sub: 'límite de 25 % por acción', weight: cash, color: 'var(--text-3)' });
                   return items;
                 })()}/>
-                <h3>Peso por sector</h3>
-                <Bars color="var(--green)" items={(pf.sectors || []).map(s => ({ key: s.name, label: sectorEs(s.name), sub: `${s.count} acción${s.count > 1 ? 'es' : ''}`, weight: s.weight }))}/>
-              </div>
+                <Donut wide title="Peso por sector" currency={cur} center={{ value: String((pf.sectors || []).length), label: 'sectores' }}
+                  items={(pf.sectors || []).map(sc => ({ key: sc.name, label: sectorEs(sc.name), sub: `${sc.count} acción${sc.count > 1 ? 'es' : ''}`, weight: sc.weight }))}/>
             </div>
           </section>}
 

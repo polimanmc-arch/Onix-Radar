@@ -297,3 +297,40 @@ body,[data-theme="light"] body{background:var(--bg-0);background-image:none}
 .simple-applied b{color:var(--text-0)}
 @media(max-width:900px){.simple-grid-groups{grid-template-columns:repeat(2,minmax(0,1fr))}}
 @media(max-width:600px){.simple-tip-pop{right:-6px}}
+
+/* ── Modo simple: escáner con gráfico de velas, donas de Markowitz y tarjetas ligeras ─── */
+.simple-scan-grid{display:grid;grid-template-columns:minmax(0,1.05fr) minmax(0,1fr);gap:18px;align-items:start}
+.simple-table-pick tbody tr{cursor:pointer;transition:background .12s}
+.simple-table-pick tbody tr:hover{background:var(--bg-2)}
+.simple-table-pick tbody tr.sel{background:var(--accent-dim)}
+.simple-table-pick tbody tr.sel td:first-child{box-shadow:inset 3px 0 0 var(--accent)}
+.simple-table-pick tbody tr:focus-visible{outline:2px solid var(--accent);outline-offset:-2px}
+.simple-candles{margin:0;padding:12px;border:1px solid var(--border);border-radius:12px;background:var(--bg-2);position:sticky;top:12px}
+.simple-candles-head{display:flex;flex-direction:column;gap:2px;margin-bottom:8px}
+.simple-candles-head div{display:flex;align-items:baseline;gap:10px}
+.simple-candles-head strong{font-size:18px;color:var(--text-0)}
+.simple-candles-head span{font-size:14px;color:var(--text-1);font-variant-numeric:tabular-nums}
+.simple-candles-head em{font-style:normal;font-weight:700;font-size:13px}
+.simple-candles-head small{font-size:12px;color:var(--text-3)}
+.simple-candles-chart{height:340px;width:100%}
+.simple-donuts{display:flex;flex-direction:column;gap:16px}
+.simple-donut{margin:0}
+.simple-donut h3{font-size:14px;margin:0 0 8px;color:var(--text-0)}
+.simple-donut-body{display:grid;grid-template-columns:170px minmax(0,1fr);gap:16px;align-items:center}
+.simple-donut-body svg{width:170px;height:170px;display:block}
+.simple-donut-legend{list-style:none;margin:0;padding:0;display:grid;grid-template-columns:repeat(auto-fill,minmax(190px,1fr));gap:6px 14px}
+.simple-donut-legend li{display:grid;grid-template-columns:12px minmax(0,1fr) auto;gap:8px;align-items:center;font-size:13px}
+.simple-donut-legend i{width:12px;height:12px;border-radius:3px}
+.simple-donut-legend span{display:flex;flex-direction:column;min-width:0}
+.simple-donut-legend b{color:var(--text-0)}
+.simple-donut-legend span small{font-size:11px;color:var(--text-3);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.simple-donut-legend strong{text-align:right;font-variant-numeric:tabular-nums;color:var(--text-0)}
+.simple-donut-legend strong small{display:block;font-weight:400;font-size:11px;color:var(--text-3)}
+.simple-tip-plain{padding:8px 10px;border-radius:8px;background:var(--bg-2)}
+.simple-tip-plain p{margin:2px 0}
+.simple-tip-plain b{color:var(--text-0)}
+@media(max-width:1000px){.simple-scan-grid{grid-template-columns:minmax(0,1fr)}.simple-candles{position:static}}
+@media(max-width:600px){.simple-donut-body{grid-template-columns:minmax(0,1fr);justify-items:center}.simple-donut-legend{width:100%}.simple-candles-chart{height:280px}}
+.simple-donut.wide{grid-column:1/-1;padding-top:14px;border-top:1px solid var(--border)}
+.simple-portfolio-grid{row-gap:22px}
+.simple-donut.wide .simple-donut-legend{grid-template-columns:repeat(auto-fill,minmax(190px,230px));column-gap:28px}

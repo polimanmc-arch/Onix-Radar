@@ -103,26 +103,87 @@ window.StockScannerUI = window.StockScannerUI || {};
                     React.createElement("i", { className: "ring" }),
                     "Mismo peso en todas"))));
     }
-    function Bars({ items, color = 'var(--accent)' }) {
-        const max = Math.max(...items.map(i => i.weight), 0.0001);
-        return React.createElement("div", { className: "simple-bars" }, items.map(it => (React.createElement("div", { key: it.key, className: "simple-bar-row" },
-            React.createElement("div", { className: "simple-bar-label" },
-                React.createElement("b", null, it.label),
-                it.sub && React.createElement("small", null, it.sub)),
-            React.createElement("div", { className: "simple-bar-track" },
-                React.createElement("span", { style: { width: (it.weight / max * 100) + '%', background: color } })),
-            React.createElement("div", { className: "simple-bar-value" },
-                pct(it.weight, 1, false),
-                it.extra && React.createElement("small", null, it.extra))))));
+    // Gráfico de velas semanales del valor seleccionado en el escáner (mismo motor que el inspector experto).
+    function SimpleCandles({ ticker, data, strategy, row, currency }) {
+        const host = useRef(null);
+        const [ok, setOk] = useState(true);
+        useEffect(() => {
+            var _a;
+            const renderer = (_a = window.StockScannerUI) === null || _a === void 0 ? void 0 : _a.ChartRenderer;
+            if (!host.current || !(data === null || data === void 0 ? void 0 : data.ok) || !window.LightweightCharts || !renderer) {
+                setOk(false);
+                return;
+            }
+            let chart = null, ro = null;
+            try {
+                const times = [...data.times].reverse();
+                const candles = times.map((time, i) => {
+                    var _a, _b;
+                    const k = times.length - 1 - i;
+                    return { time, open: (_b = (_a = data.opens) === null || _a === void 0 ? void 0 : _a[k]) !== null && _b !== void 0 ? _b : data.closes[k], high: data.highs[k], low: data.lows[k], close: data.closes[k] };
+                });
+                chart = renderer.buildPriceChart(host.current, data, times, candles, {
+                    activeFilters: strategy.entry, activeEntryRules: [], activeExitRules: [], chartTf: '1wk', backtestTrades: [],
+                    showExitInfo: false, showVolume: true, showIndicators: true, setCrossInfo: () => { }, priceHeight: host.current.clientHeight || 340,
+                });
+                if (times.length > 104)
+                    chart.timeScale().setVisibleLogicalRange({ from: times.length - 104, to: times.length + 2 });
+                ro = new ResizeObserver(() => host.current && chart.applyOptions({ width: host.current.clientWidth, height: host.current.clientHeight || 340 }));
+                ro.observe(host.current);
+                setOk(true);
+            }
+            catch (e) {
+                console.warn('Onix modo simple:', e);
+                setOk(false);
+            }
+            return () => { ro === null || ro === void 0 ? void 0 : ro.disconnect(); renderer.disposeChart(chart); };
+        }, [ticker, data, strategy]);
+        const lines = (strategy.entry || []).flatMap(f => [f, f.cmpType === 'ind' ? { ind: f.cmpInd, params: f.cmpParams } : null])
+            .filter(f => f && ['WMA', 'SMA', 'EMA'].includes(f.ind)).map(f => `${f.ind}(${f.params.p})`);
+        return (React.createElement("figure", { className: "simple-candles" },
+            React.createElement("figcaption", { className: "simple-candles-head" },
+                React.createElement("div", null,
+                    React.createElement("strong", null, ticker),
+                    row && React.createElement("span", null, `${num(row.price)} ${currency}`),
+                    row && React.createElement("em", { className: row.chg >= 0 ? 'up' : 'down' }, pct(row.chg))),
+                React.createElement("small", null, `Velas semanales · últimos 2 años${lines.length ? ' · ' + [...new Set(lines)].join(', ') : ''}`)),
+            React.createElement("div", { ref: host, className: "simple-candles-chart", role: "img", "aria-label": `Gráfico de velas semanales de ${ticker}` }),
+            !ok && React.createElement("p", { className: "simple-note" }, "No hay gr\u00E1fico disponible para este valor.")));
+    }
+    // Gráfico de dona con leyenda: reparto del dinero por acción o por sector.
+    const DONUT_COLORS = ['#5b8cff', '#2ec4a6', '#f5a623', '#e8577c', '#9b6dff', '#3fb8e6', '#8bc34a', '#ff7a45', '#d4b106', '#c06fd6', '#4dd0a0', '#ef6461'];
+    function Donut({ items, title, center, currency, wide }) {
+        const R = 70, SW = 26, CIRC = 2 * Math.PI * R;
+        const total = items.reduce((t, i) => t + i.weight, 0) || 1;
+        let acc = 0;
+        const slices = items.map((it, i) => { const frac = it.weight / total, sl = { ...it, frac, off: acc, color: it.color || DONUT_COLORS[i % DONUT_COLORS.length] }; acc += frac; return sl; });
+        return (React.createElement("figure", { className: 'simple-donut' + (wide ? ' wide' : '') },
+            React.createElement("h3", null, title),
+            React.createElement("div", { className: "simple-donut-body" },
+                React.createElement("svg", { viewBox: "0 0 200 200", role: "img", "aria-label": `${title}: ` + slices.map(sl => `${sl.label} ${pct(sl.weight, 1, false)}`).join(', ') },
+                    React.createElement("circle", { cx: "100", cy: "100", r: R, fill: "none", stroke: "var(--bg-3)", strokeWidth: SW }),
+                    slices.map(sl => React.createElement("circle", { key: sl.key, cx: "100", cy: "100", r: R, fill: "none", stroke: sl.color, strokeWidth: SW, strokeDasharray: `${Math.max(0, sl.frac * CIRC - (slices.length > 1 ? 1.5 : 0))} ${CIRC}`, strokeDashoffset: -sl.off * CIRC, transform: "rotate(-90 100 100)" },
+                        React.createElement("title", null, `${sl.label}: ${pct(sl.weight, 1, false)}`))),
+                    React.createElement("text", { x: "100", y: "98", textAnchor: "middle", fontSize: "30", fontWeight: "800", fill: "var(--text-0)" }, center.value),
+                    React.createElement("text", { x: "100", y: "120", textAnchor: "middle", fontSize: "13", fill: "var(--text-2)" }, center.label)),
+                React.createElement("ul", { className: "simple-donut-legend" }, slices.map(sl => (React.createElement("li", { key: sl.key },
+                    React.createElement("i", { style: { background: sl.color } }),
+                    React.createElement("span", null,
+                        React.createElement("b", null, sl.label),
+                        sl.sub && React.createElement("small", null, sl.sub)),
+                    React.createElement("strong", null,
+                        pct(sl.weight, 1, false),
+                        currency && React.createElement("small", null, money(sl.weight * 10000, currency))))))))));
     }
     const STAGES = [{ id: 'scan', label: 'Escáner' }, { id: 'portfolio', label: 'Portafolio Markowitz' }, { id: 'backtest', label: 'Backtest' }];
     function SimpleMode() {
-        var _a;
+        var _a, _b, _c;
         const C = core();
         const markets = C.SIMPLE_MARKETS, groups = C.SIMPLE_MARKET_GROUPS, strategies = C.SIMPLE_STRATEGIES, periods = C.SIMPLE_PERIODS;
         const [marketId, setMarketId] = useState('DOW30');
         const [strategyId, setStrategyId] = useState('base');
         const [tipOpen, setTipOpen] = useState(null);
+        const [selTicker, setSelTicker] = useState(null);
         const [years, setYears] = useState(3);
         const [stage, setStage] = useState('idle');
         const [progress, setProgress] = useState('');
@@ -148,6 +209,7 @@ window.StockScannerUI = window.StockScannerUI || {};
             const cfg = { market, strategy, period };
             setError(null);
             setRun({ ...cfg });
+            setSelTicker(null);
             setTimeout(() => { var _a, _b; return (_b = (_a = sectionRef.current) === null || _a === void 0 ? void 0 : _a.scrollIntoView) === null || _b === void 0 ? void 0 : _b.call(_a, { behavior: 'smooth', block: 'start' }); }, 60);
             try {
                 // 1. Escáner
@@ -216,6 +278,7 @@ window.StockScannerUI = window.StockScannerUI || {};
         const cur = (_a = run === null || run === void 0 ? void 0 : run.market) === null || _a === void 0 ? void 0 : _a.currency;
         const scan = run === null || run === void 0 ? void 0 : run.scan, pf = run === null || run === void 0 ? void 0 : run.portfolio, bt = run === null || run === void 0 ? void 0 : run.backtest;
         const inPortfolio = new Set(((pf === null || pf === void 0 ? void 0 : pf.allocations) || []).map(a => a.ticker));
+        const selected = (scan === null || scan === void 0 ? void 0 : scan.passing.some(r => r.ticker === selTicker)) ? selTicker : (_b = scan === null || scan === void 0 ? void 0 : scan.passing[0]) === null || _b === void 0 ? void 0 : _b.ticker;
         const fmtCol = (v, fmt) => fmt === 'pct' ? pct(v) : fmt === 'num' ? num(v, 1) : (v !== null && v !== void 0 ? v : '—');
         return (React.createElement("div", { className: "simple-mode" },
             React.createElement("section", { className: "simple-hero" },
@@ -247,19 +310,20 @@ window.StockScannerUI = window.StockScannerUI || {};
                             React.createElement("span", { className: "simple-ind-list", "aria-label": "Indicadores" },
                                 st.indicators.map(i => React.createElement("i", { key: i.name }, i.name)),
                                 React.createElement("i", { className: "tf" }, "Velas semanales")),
-                            React.createElement("span", { className: "simple-rule" },
-                                React.createElement("b", null, "Compra:"),
-                                " ",
-                                st.buy),
-                            React.createElement("span", { className: "simple-rule" },
-                                React.createElement("b", null, "Vende:"),
-                                " ",
-                                st.sell),
                             React.createElement("em", { className: "simple-badge" }, st.isBase ? '★ Base · ' + st.level : st.level)),
                         React.createElement("div", { className: 'simple-tip' + (tipOpen === st.id ? ' open' : ''), onMouseLeave: () => setTipOpen(t => t === st.id ? null : t) },
                             React.createElement("button", { type: "button", className: "simple-tip-btn", "aria-label": `Ver el detalle de ${st.name}`, "aria-expanded": tipOpen === st.id, onClick: () => setTipOpen(t => t === st.id ? null : st.id) }, "i"),
                             React.createElement("div", { className: "simple-tip-pop", role: "tooltip" },
                                 React.createElement("strong", null, `${st.icon} ${st.name}`),
+                                React.createElement("div", { className: "simple-tip-sec simple-tip-plain" },
+                                    React.createElement("p", null,
+                                        React.createElement("b", null, "Compra:"),
+                                        " ",
+                                        st.buy),
+                                    React.createElement("p", null,
+                                        React.createElement("b", null, "Vende:"),
+                                        " ",
+                                        st.sell)),
                                 React.createElement("div", { className: "simple-tip-sec" },
                                     React.createElement("b", null, "Compra cuando se cumplen todas:"),
                                     React.createElement("ul", null, st.rulesBuy.map(r => React.createElement("li", { key: r }, r)))),
@@ -313,27 +377,32 @@ window.StockScannerUI = window.StockScannerUI || {};
                         React.createElement("div", null,
                             React.createElement("span", null, "Del mercado"),
                             React.createElement("strong", null, scan.analyzed ? pct(scan.passing.length / scan.analyzed, 0, false) : '—'))),
-                    scan.passing.length ? React.createElement("div", { className: "simple-table-wrap" },
-                        React.createElement("table", { className: "simple-table" },
-                            React.createElement("thead", null,
-                                React.createElement("tr", null,
-                                    React.createElement("th", null, "#"),
-                                    React.createElement("th", null, "Acci\u00F3n"),
-                                    React.createElement("th", null, "Precio"),
-                                    React.createElement("th", null, "\u00DAltima semana"),
-                                    run.strategy.columns.map(col => React.createElement("th", { key: col.label, title: col.hint }, col.label)),
-                                    React.createElement("th", { title: "Rentabilidad por unidad de riesgo en el \u00FAltimo a\u00F1o" }, "Sharpe 1 a\u00F1o"),
-                                    React.createElement("th", null))),
-                            React.createElement("tbody", null, scan.passing.slice(0, 12).map((r, i) => (React.createElement("tr", { key: r.ticker },
-                                React.createElement("td", null, i + 1),
-                                React.createElement("td", null,
-                                    React.createElement("b", null, r.ticker)),
-                                React.createElement("td", null, num(r.price)),
-                                React.createElement("td", { className: r.chg >= 0 ? 'up' : 'down' }, pct(r.chg)),
-                                r.values.map((v, k) => React.createElement("td", { key: k }, fmtCol(v, run.strategy.columns[k].fmt))),
-                                React.createElement("td", null, num(r.sharpe1y)),
-                                React.createElement("td", null, inPortfolio.has(r.ticker) && React.createElement("span", { className: "simple-tag" }, "En cartera"))))))),
-                        scan.passing.length > 12 && React.createElement("p", { className: "simple-note" }, `Y ${scan.passing.length - 12} acciones más. Las ${Math.min(scan.passing.length, C.SIMPLE_CANDIDATES)} con mejor Sharpe del último año pasan al optimizador.`))
+                    scan.passing.length ? React.createElement("div", { className: "simple-scan-grid" },
+                        React.createElement("div", { className: "simple-table-wrap" },
+                            React.createElement("table", { className: "simple-table simple-table-pick" },
+                                React.createElement("thead", null,
+                                    React.createElement("tr", null,
+                                        React.createElement("th", null, "#"),
+                                        React.createElement("th", null, "Acci\u00F3n"),
+                                        React.createElement("th", null, "Precio"),
+                                        React.createElement("th", null, "Semana"),
+                                        run.strategy.columns.map(col => React.createElement("th", { key: col.label, title: col.hint }, col.label)),
+                                        React.createElement("th", { title: "Rentabilidad por unidad de riesgo en el \u00FAltimo a\u00F1o" }, "Sharpe 1a"),
+                                        React.createElement("th", null))),
+                                React.createElement("tbody", null, scan.passing.slice(0, 12).map((r, i) => (React.createElement("tr", { key: r.ticker, tabIndex: 0, "aria-selected": r.ticker === selected, className: r.ticker === selected ? 'sel' : '', onClick: () => setSelTicker(r.ticker), onKeyDown: e => { if (e.key === 'Enter' || e.key === ' ') {
+                                        e.preventDefault();
+                                        setSelTicker(r.ticker);
+                                    } } },
+                                    React.createElement("td", null, i + 1),
+                                    React.createElement("td", null,
+                                        React.createElement("b", null, r.ticker)),
+                                    React.createElement("td", null, num(r.price)),
+                                    React.createElement("td", { className: r.chg >= 0 ? 'up' : 'down' }, pct(r.chg)),
+                                    r.values.map((v, k) => React.createElement("td", { key: k }, fmtCol(v, run.strategy.columns[k].fmt))),
+                                    React.createElement("td", null, num(r.sharpe1y)),
+                                    React.createElement("td", null, inPortfolio.has(r.ticker) && React.createElement("span", { className: "simple-tag" }, "En cartera"))))))),
+                            React.createElement("p", { className: "simple-note" }, `Haz clic en una fila para ver su gráfico.${scan.passing.length > 12 ? ` Y ${scan.passing.length - 12} acciones más.` : ''} Las ${Math.min(scan.passing.length, C.SIMPLE_CANDIDATES)} con mejor Sharpe del último año pasan al optimizador.`)),
+                        selected && React.createElement(SimpleCandles, { ticker: selected, data: (_c = cacheRef.current[selected]) === null || _c === void 0 ? void 0 : _c['1wk'], strategy: run.strategy, currency: cur, row: scan.passing.find(r => r.ticker === selected) }))
                         : React.createElement("p", { className: "simple-note" }, "Hoy ninguna acci\u00F3n del mercado cumple las reglas: la estrategia esperar\u00EDa.")),
                 run.portfolioError && React.createElement("section", { className: "simple-panel", "aria-label": "Portafolio" },
                     React.createElement("header", null,
@@ -366,18 +435,15 @@ window.StockScannerUI = window.StockScannerUI || {};
                             React.createElement("small", null, `de ${Math.min((scan === null || scan === void 0 ? void 0 : scan.passing.length) || 0, C.SIMPLE_CANDIDATES)} candidatas`))),
                     React.createElement("div", { className: "simple-portfolio-grid" },
                         React.createElement(FrontierChart, { portfolio: pf }),
-                        React.createElement("div", null,
-                            React.createElement("h3", null, "Peso por acci\u00F3n"),
-                            React.createElement(Bars, { items: (() => {
-                                    const items = pf.allocations.map(a => ({ key: a.ticker, label: a.ticker, sub: a.shortName && a.shortName !== a.ticker ? a.shortName : sectorEs(a.sector), weight: Math.abs(a.weight), extra: money(Math.abs(a.weight) * 10000, cur) }));
-                                    const cash = 1 - items.reduce((t, i) => t + i.weight, 0);
-                                    // Con pocas acciones, el límite de 25 % por acción deja parte en efectivo.
-                                    if (cash > 0.01)
-                                        items.push({ key: 'cash', label: 'Efectivo', sub: 'por el límite de 25 % por acción', weight: cash, extra: money(cash * 10000, cur) });
-                                    return items;
-                                })() }),
-                            React.createElement("h3", null, "Peso por sector"),
-                            React.createElement(Bars, { color: "var(--green)", items: (pf.sectors || []).map(s => ({ key: s.name, label: sectorEs(s.name), sub: `${s.count} acción${s.count > 1 ? 'es' : ''}`, weight: s.weight })) })))),
+                        React.createElement(Donut, { title: "Peso por acci\u00F3n", currency: cur, center: { value: String(pf.allocations.length), label: 'acciones' }, items: (() => {
+                                const items = pf.allocations.map(a => ({ key: a.ticker, label: a.ticker, sub: a.shortName && a.shortName !== a.ticker ? a.shortName : sectorEs(a.sector), weight: Math.abs(a.weight) }));
+                                const cash = 1 - items.reduce((t, i) => t + i.weight, 0);
+                                // Con pocas acciones, el límite de 25 % por acción deja parte en efectivo.
+                                if (cash > 0.01)
+                                    items.push({ key: 'cash', label: 'Efectivo', sub: 'límite de 25 % por acción', weight: cash, color: 'var(--text-3)' });
+                                return items;
+                            })() }),
+                        React.createElement(Donut, { wide: true, title: "Peso por sector", currency: cur, center: { value: String((pf.sectors || []).length), label: 'sectores' }, items: (pf.sectors || []).map(sc => ({ key: sc.name, label: sectorEs(sc.name), sub: `${sc.count} acción${sc.count > 1 ? 'es' : ''}`, weight: sc.weight })) }))),
                 run.backtestError && React.createElement("section", { className: "simple-panel", "aria-label": "Backtest" },
                     React.createElement("header", null,
                         React.createElement("span", { className: "simple-panel-n" }, "3"),
