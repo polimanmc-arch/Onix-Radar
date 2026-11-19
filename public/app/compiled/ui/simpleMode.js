@@ -950,7 +950,7 @@ window.StockScannerUI = window.StockScannerUI || {};
                                     React.createElement("button", { type: "button", "aria-pressed": weightView === 'stock', onClick: () => setWeightView('stock') }, "Por acci\u00F3n"),
                                     React.createElement("button", { type: "button", "aria-pressed": weightView === 'sector', onClick: () => setWeightView('sector') }, "Por sector"))),
                             weightView === 'stock'
-                                ? React.createElement(Donut, { key: "stock", title: "Peso por acci\u00F3n", currency: cur, capital: run.capital || 0, center: stockCenter, items: stockItems, onPick: openStock, showNames: true })
+                                ? React.createElement(Donut, { key: "stock", title: "Peso por acci\u00F3n", currency: cur, capital: run.capital || 0, center: stockCenter, items: stockItems, onPick: openStock })
                                 : React.createElement(Donut, { key: "sector", title: "Peso por sector", currency: cur, capital: run.capital || 0, center: sectorCenter, items: sectorItems })))),
                 (pf || run.portfolioError) && !bt && !run.backtestError && !running && React.createElement("div", { className: "simple-next" },
                     React.createElement("p", null,

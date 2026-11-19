@@ -816,7 +816,7 @@ window.StockScannerUI = window.StockScannerUI || {};
                   </div>
                 </div>
                 {weightView === 'stock'
-                  ? <Donut key="stock" title="Peso por acción" currency={cur} capital={run.capital || 0} center={stockCenter} items={stockItems} onPick={openStock} showNames/>
+                  ? <Donut key="stock" title="Peso por acción" currency={cur} capital={run.capital || 0} center={stockCenter} items={stockItems} onPick={openStock}/>
                   : <Donut key="sector" title="Peso por sector" currency={cur} capital={run.capital || 0} center={sectorCenter} items={sectorItems}/>}
               </div>
             </div>
