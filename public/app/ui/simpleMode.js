@@ -72,6 +72,19 @@ window.StockScannerUI = window.StockScannerUI || {};
     </label>;
   }
 
+  // Selector de años del backtest: − [n] + (de 1 al máximo).
+  function YearsInput({ value, onChange, max }){
+    const clamp = v => Math.min(max, Math.max(1, v));
+    return <div className="simple-years" role="group" aria-label="Años del backtest">
+      <span>Años:</span>
+      <button type="button" aria-label="Menos años" onClick={() => onChange(clamp(value - 1))} disabled={value <= 1}>−</button>
+      <input type="text" inputMode="numeric" aria-label="Número de años del backtest" value={value}
+        onChange={e => { const v = Number(e.target.value.replace(/\D/g, '').slice(-1)); if(v) onChange(clamp(v)); }}/>
+      <button type="button" aria-label="Más años" onClick={() => onChange(clamp(value + 1))} disabled={value >= max}>+</button>
+      <small>{value > 3 ? 'descarga 10 años de precios' : `máx. ${max}`}</small>
+    </div>;
+  }
+
   function Stars({ n, size = 26 }){
     return <span className="simple-stars" aria-label={`${n} de 3 estrellas`} style={{ fontSize: size }}>
       {[0, 1, 2].map(i => <span key={i} aria-hidden="true" className={i < n ? 'on' : 'off'}>★</span>)}
@@ -317,7 +330,7 @@ window.StockScannerUI = window.StockScannerUI || {};
     const tagOf = st => st && mktOnOf(st) !== !!st.marketDefault ? (mktOnOf(st) ? ' + filtro S&P' : ' sin filtro S&P') : '';
     const baseStrategy = strategies.find(s => s.id === strategyId);
     const strategy = useMemo(() => effOf(baseStrategy), [baseStrategy, mktFilter]);
-    const period = periods.find(p => p.years === years) || periods[periods.length - 1];
+    const period = C.simplePeriod(years);
 
     const running = stage !== 'idle';
     const ready = market && strategy && !running;
@@ -381,6 +394,15 @@ window.StockScannerUI = window.StockScannerUI || {};
       const cfg = { market: run.market, strategy: run.strategy, period, capital: run.capital || capital };
       return runStep('backtest', async ac => {
         setProgress('Preparando el backtest');
+        // Más de 3 años: hacen falta 10 años de precios semanales (sólo se descargan una vez).
+        const range = C.simpleRangeForYears(period.years);
+        if(range !== '5y'){
+          const universe = await C.resolveSimpleUniverse(cfg.market);
+          const need = [...new Set([...universe, cfg.market.benchmark, cfg.strategy.market?.ticker].filter(Boolean))];
+          await C.loadSimpleWeekly({ tickers: need, cacheRef, signal: ac.signal, range,
+            onProgress: (d, t) => { setProgress(`Descargando 10 años de precios ${n(d)} de ${n(t)}`); setProgressPct(d / t * 100); } });
+          setProgressPct(null); setProgress('Preparando el backtest');
+        }
         let raw = null;
         const out = await C.runBacktestWorkflow({
           ...C.buildSimpleBacktestOptions(cfg), dataCacheRef: cacheRef, abortSignal: ac.signal,
@@ -623,10 +645,7 @@ window.StockScannerUI = window.StockScannerUI || {};
 
           {(pf || run.portfolioError) && !bt && !run.backtestError && !running && <div className="simple-next">
             <p><b>Siguiente:</b> {`simular la estrategia en el pasado, semana a semana, y compararla con comprar ${run.market.holdLabel} y esperar.`}</p>
-            <div className="simple-periods" role="group" aria-label="Periodo del backtest">
-              <span>Periodo:</span>
-              {periods.map(p => <button type="button" key={p.years} aria-pressed={p.years === years} onClick={() => setYears(p.years)}>{p.label}</button>)}
-            </div>
+            <YearsInput value={years} onChange={setYears} max={C.SIMPLE_MAX_YEARS}/>
             <button type="button" className="simple-play" onClick={runBacktest}>▶  Paso 5 · Ejecutar el backtest</button>
           </div>}
           {run.backtestError && <section id="simple-panel-backtest" className="simple-panel" aria-label="Backtest"><header><span className="simple-panel-n error">5</span><div><h2>Backtest</h2><p>{run.backtestError}</p></div></header></section>}
@@ -635,10 +654,18 @@ window.StockScannerUI = window.StockScannerUI || {};
               <h2>Backtest · ¿habría funcionado en el pasado?</h2>
               <p>{`${run.period?.label ? 'Periodo: ' + run.period.label + '. ' : ''}La estrategia se aplica semana a semana desde ${monthYear(bt.summary.start)} con ${money(bt.summary.capital, cur)}: compra cuando se cumplen las reglas, vende cuando se cumplen las de salida, reparte el dinero según rentabilidad/riesgo y descuenta comisiones.`}</p>
             </div></header>
-            {run.capital > 0 && run.capital !== bt.summary.capital && !running && <div className="simple-rerun">
-              <span>{`Has cambiado el dinero a ${money(run.capital, cur)}; este backtest se hizo con ${money(bt.summary.capital, cur)}.`}</span>
-              <button type="button" className="simple-view" onClick={runBacktest}>{`↻ Repetir con ${money(run.capital, cur)}`}</button>
-            </div>}
+            {(() => {
+              // Cambiar los años (o el dinero) y repetir el backtest sin rehacer los pasos anteriores.
+              const capChanged = run.capital > 0 && run.capital !== bt.summary.capital;
+              const yearsChanged = run.period?.years && years !== run.period.years;
+              const changes = [yearsChanged && `${period.label} (antes ${run.period.label})`, capChanged && `${money(run.capital, cur)} (antes ${money(bt.summary.capital, cur)})`].filter(Boolean);
+              return <div className={'simple-rerun' + (changes.length ? ' changed' : '')}>
+                <YearsInput value={years} onChange={setYears} max={C.SIMPLE_MAX_YEARS}/>
+                <span>{changes.length ? `Nuevo backtest: ${changes.join(' · ')}` : 'Cambia los años o el dinero para repetir el backtest.'}</span>
+                <button type="button" className="simple-view" onClick={runBacktest} disabled={running || !changes.length}>
+                  {capChanged && !yearsChanged ? `↻ Repetir con ${money(run.capital, cur)}` : '↻ Repetir el backtest'}</button>
+              </div>;
+            })()}
             <div className="simple-result-head">
               <div className="simple-result-title">{bt.summary.headline}</div>
               <Stars n={bt.summary.stars}/>

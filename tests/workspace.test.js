@@ -444,7 +444,9 @@ test('simple mode: first visit opens the 3-step simulator, plays a game and can 
   await Renderer.act(async()=>{ await btn('Paso 4 · Construir el portafolio').props.onClick(); });
   assert.equal(tree.root.findAllByProps({'aria-label':'Resultado del backtest'}).length,0);
   // Paso 5: backtest con el periodo elegido junto a su botón.
-  await Renderer.act(async()=>btn('1 año').props.onClick());
+  const less=tree.root.findByProps({'aria-label':'Menos años'});
+  await Renderer.act(async()=>less.props.onClick()); await Renderer.act(async()=>tree.root.findByProps({'aria-label':'Menos años'}).props.onClick());
+  assert.equal(tree.root.findByProps({'aria-label':'Número de años del backtest'}).props.value,1,'1 year chosen with the stepper');
   await Renderer.act(async()=>{ await btn('Paso 5 · Ejecutar el backtest').props.onClick(); });
   // Las tres etapas del proceso quedan a la vista.
   assert.equal(tree.root.findAllByProps({'aria-label':'Portafolio de Markowitz'}).length,1,'Markowitz section');

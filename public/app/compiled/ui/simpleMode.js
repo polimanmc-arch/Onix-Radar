@@ -84,6 +84,17 @@ window.StockScannerUI = window.StockScannerUI || {};
             React.createElement("input", { type: "text", inputMode: "numeric", "aria-label": `Dinero a invertir en ${cur}`, placeholder: "10.000", value: value ? value.toLocaleString('es-ES') : '', onChange: e => { const v = Number(e.target.value.replace(/\D/g, '').slice(0, 12)); onChange(Number.isFinite(v) ? v : 0); } }),
             React.createElement("em", null, cur));
     }
+    // Selector de años del backtest: − [n] + (de 1 al máximo).
+    function YearsInput({ value, onChange, max }) {
+        const clamp = v => Math.min(max, Math.max(1, v));
+        return React.createElement("div", { className: "simple-years", role: "group", "aria-label": "A\u00F1os del backtest" },
+            React.createElement("span", null, "A\u00F1os:"),
+            React.createElement("button", { type: "button", "aria-label": "Menos a\u00F1os", onClick: () => onChange(clamp(value - 1)), disabled: value <= 1 }, "\u2212"),
+            React.createElement("input", { type: "text", inputMode: "numeric", "aria-label": "N\u00FAmero de a\u00F1os del backtest", value: value, onChange: e => { const v = Number(e.target.value.replace(/\D/g, '').slice(-1)); if (v)
+                    onChange(clamp(v)); } }),
+            React.createElement("button", { type: "button", "aria-label": "M\u00E1s a\u00F1os", onClick: () => onChange(clamp(value + 1)), disabled: value >= max }, "+"),
+            React.createElement("small", null, value > 3 ? 'descarga 10 años de precios' : `máx. ${max}`));
+    }
     function Stars({ n, size = 26 }) {
         return React.createElement("span", { className: "simple-stars", "aria-label": `${n} de 3 estrellas`, style: { fontSize: size } }, [0, 1, 2].map(i => React.createElement("span", { key: i, "aria-hidden": "true", className: i < n ? 'on' : 'off' }, "\u2605")));
     }
@@ -331,7 +342,7 @@ window.StockScannerUI = window.StockScannerUI || {};
         const tagOf = st => st && mktOnOf(st) !== !!st.marketDefault ? (mktOnOf(st) ? ' + filtro S&P' : ' sin filtro S&P') : '';
         const baseStrategy = strategies.find(s => s.id === strategyId);
         const strategy = useMemo(() => effOf(baseStrategy), [baseStrategy, mktFilter]);
-        const period = periods.find(p => p.years === years) || periods[periods.length - 1];
+        const period = C.simplePeriod(years);
         const running = stage !== 'idle';
         const ready = market && strategy && !running;
         // Si cambian mercado, estrategia o filtro, los resultados anteriores ya no corresponden.
@@ -425,7 +436,18 @@ window.StockScannerUI = window.StockScannerUI || {};
                 return undefined;
             const cfg = { market: run.market, strategy: run.strategy, period, capital: run.capital || capital };
             return runStep('backtest', async (ac) => {
+                var _a;
                 setProgress('Preparando el backtest');
+                // Más de 3 años: hacen falta 10 años de precios semanales (sólo se descargan una vez).
+                const range = C.simpleRangeForYears(period.years);
+                if (range !== '5y') {
+                    const universe = await C.resolveSimpleUniverse(cfg.market);
+                    const need = [...new Set([...universe, cfg.market.benchmark, (_a = cfg.strategy.market) === null || _a === void 0 ? void 0 : _a.ticker].filter(Boolean))];
+                    await C.loadSimpleWeekly({ tickers: need, cacheRef, signal: ac.signal, range,
+                        onProgress: (d, t) => { setProgress(`Descargando 10 años de precios ${n(d)} de ${n(t)}`); setProgressPct(d / t * 100); } });
+                    setProgressPct(null);
+                    setProgress('Preparando el backtest');
+                }
                 let raw = null;
                 const out = await C.runBacktestWorkflow({
                     ...C.buildSimpleBacktestOptions(cfg), dataCacheRef: cacheRef, abortSignal: ac.signal,
@@ -717,9 +739,7 @@ window.StockScannerUI = window.StockScannerUI || {};
                         React.createElement("b", null, "Siguiente:"),
                         " ",
                         `simular la estrategia en el pasado, semana a semana, y compararla con comprar ${run.market.holdLabel} y esperar.`),
-                    React.createElement("div", { className: "simple-periods", role: "group", "aria-label": "Periodo del backtest" },
-                        React.createElement("span", null, "Periodo:"),
-                        periods.map(p => React.createElement("button", { type: "button", key: p.years, "aria-pressed": p.years === years, onClick: () => setYears(p.years) }, p.label))),
+                    React.createElement(YearsInput, { value: years, onChange: setYears, max: C.SIMPLE_MAX_YEARS }),
                     React.createElement("button", { type: "button", className: "simple-play", onClick: runBacktest }, "\u25B6  Paso 5 \u00B7 Ejecutar el backtest")),
                 run.backtestError && React.createElement("section", { id: "simple-panel-backtest", className: "simple-panel", "aria-label": "Backtest" },
                     React.createElement("header", null,
@@ -733,9 +753,17 @@ window.StockScannerUI = window.StockScannerUI || {};
                         React.createElement("div", null,
                             React.createElement("h2", null, "Backtest \u00B7 \u00BFhabr\u00EDa funcionado en el pasado?"),
                             React.createElement("p", null, `${((_d = run.period) === null || _d === void 0 ? void 0 : _d.label) ? 'Periodo: ' + run.period.label + '. ' : ''}La estrategia se aplica semana a semana desde ${monthYear(bt.summary.start)} con ${money(bt.summary.capital, cur)}: compra cuando se cumplen las reglas, vende cuando se cumplen las de salida, reparte el dinero según rentabilidad/riesgo y descuenta comisiones.`))),
-                    run.capital > 0 && run.capital !== bt.summary.capital && !running && React.createElement("div", { className: "simple-rerun" },
-                        React.createElement("span", null, `Has cambiado el dinero a ${money(run.capital, cur)}; este backtest se hizo con ${money(bt.summary.capital, cur)}.`),
-                        React.createElement("button", { type: "button", className: "simple-view", onClick: runBacktest }, `↻ Repetir con ${money(run.capital, cur)}`)),
+                    (() => {
+                        var _a;
+                        // Cambiar los años (o el dinero) y repetir el backtest sin rehacer los pasos anteriores.
+                        const capChanged = run.capital > 0 && run.capital !== bt.summary.capital;
+                        const yearsChanged = ((_a = run.period) === null || _a === void 0 ? void 0 : _a.years) && years !== run.period.years;
+                        const changes = [yearsChanged && `${period.label} (antes ${run.period.label})`, capChanged && `${money(run.capital, cur)} (antes ${money(bt.summary.capital, cur)})`].filter(Boolean);
+                        return React.createElement("div", { className: 'simple-rerun' + (changes.length ? ' changed' : '') },
+                            React.createElement(YearsInput, { value: years, onChange: setYears, max: C.SIMPLE_MAX_YEARS }),
+                            React.createElement("span", null, changes.length ? `Nuevo backtest: ${changes.join(' · ')}` : 'Cambia los años o el dinero para repetir el backtest.'),
+                            React.createElement("button", { type: "button", className: "simple-view", onClick: runBacktest, disabled: running || !changes.length }, capChanged && !yearsChanged ? `↻ Repetir con ${money(run.capital, cur)}` : '↻ Repetir el backtest'));
+                    })(),
                     React.createElement("div", { className: "simple-result-head" },
                         React.createElement("div", { className: "simple-result-title" }, bt.summary.headline),
                         React.createElement(Stars, { n: bt.summary.stars })),

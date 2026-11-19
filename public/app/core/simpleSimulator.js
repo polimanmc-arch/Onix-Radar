@@ -134,6 +134,12 @@
   STRATEGIES.forEach((st, i) => { if(st.marketDefault) STRATEGIES[i] = withMarketFilter(st, true); });
 
   const PERIODS = [ { years: 1, weeks: 52, label: '1 año' }, { years: 3, weeks: 156, label: '3 años' } ];
+  // Periodo libre del backtest: de 1 a 8 años. Hasta 3 años bastan los 5 años de precios semanales del
+  // escáner; para más se descargan 10 años (las medias necesitan historia previa al inicio).
+  const MAX_YEARS = 8;
+  const periodFor = years => { const y = Math.min(MAX_YEARS, Math.max(1, Math.round(Number(years) || 1))); return { years: y, weeks: y * 52, label: y === 1 ? '1 año' : `${y} años` }; };
+  const rangeForYears = years => (Number(years) > 3 ? '10y' : '5y');
+  const RANGE_YEARS = { '5y': 5, '10y': 10 };
   const CAPITAL = 10000;
 
   const withIds = list => list.map((x, i) => ({ _id: 'simple_' + i + '_' + x.ind, ...JSON.parse(JSON.stringify(x)) }));
@@ -252,18 +258,22 @@
 
   // Descarga una sola vez los precios semanales del mercado (por lotes) y los deja en la caché que
   // después usan el portafolio y el backtest.
-  async function loadWeekly({ tickers, cacheRef, onProgress, signal, fetchImpl = (u, o) => fetch(u, o) }){
+  async function loadWeekly({ tickers, cacheRef, onProgress, signal, range = null, fetchImpl = (u, o) => fetch(u, o) }){
     const tf = (window.StockScannerConfig?.TIMEFRAMES || []).find(t => t.id === '1wk') || { yahooInterval: '1wk', yahooRange: '5y' };
-    const missing = tickers.filter(t => !cacheRef.current?.[t]?.['1wk']?.ok);
+    const want = range || tf.yahooRange;
+    // Falta si no hay datos o si se descargaron con menos años de los que se piden ahora.
+    // (Datos sin marca de rango con más de ~5,5 años de velas ya cubren los 10 años pedidos.)
+    const yearsOf = d => RANGE_YEARS[d.range] || (d.closes.length > 290 ? 10 : 5);
+    const missing = tickers.filter(t => { const d = cacheRef.current?.[t]?.['1wk']; return !d?.ok || yearsOf(d) < (RANGE_YEARS[want] || 5); });
     const size = 100;
     for(let i = 0; i < missing.length; i += size){
       if(signal?.aborted){ const e = new Error('Cancelado'); e.name = 'AbortError'; throw e; }
       const batch = missing.slice(i, i + size);
       const res = await fetchImpl('/api/charts', { method: 'POST', headers: { 'Content-Type': 'application/json' }, signal,
-        body: JSON.stringify({ symbols: batch, interval: tf.yahooInterval, range: tf.yahooRange, concurrency: 18 }) });
+        body: JSON.stringify({ symbols: batch, interval: tf.yahooInterval, range: want, concurrency: 18 }) });
       const json = await res.json().catch(() => ({}));
       for(const t of batch){
-        const parsed = parseChart(t, json?.results?.[t]);
+        const parsed = { ...parseChart(t, json?.results?.[t]), range: want };
         cacheRef.current[t] = { ...(cacheRef.current[t] || {}), '1wk': parsed };
       }
       if(typeof onProgress === 'function') onProgress(Math.min(missing.length, i + size), missing.length);
@@ -325,7 +335,7 @@
   window.StockScannerCore = Object.assign(window.StockScannerCore || {}, {
     loadSimpleWeekly: loadWeekly, scanSimpleMarket: scanMarket, buildSimplePortfolioOptions, SIMPLE_CANDIDATES: CANDIDATES,
     todaySimpleSignals: todaySignals,
-    SIMPLE_MARKETS: MARKETS, SIMPLE_MARKET_GROUPS: MARKET_GROUPS, SIMPLE_PROCESS_METRICS: PROCESS_METRICS, simpleUniverseTickers: universeTickers, resolveSimpleUniverse: resolveUniverse, simpleUniverseReady: universeReady, SIMPLE_STRATEGIES: STRATEGIES, simpleWithMarketFilter: withMarketFilter, SIMPLE_PERIODS: PERIODS, SIMPLE_CAPITAL: CAPITAL,
+    SIMPLE_MARKETS: MARKETS, SIMPLE_MARKET_GROUPS: MARKET_GROUPS, SIMPLE_PROCESS_METRICS: PROCESS_METRICS, simpleUniverseTickers: universeTickers, resolveSimpleUniverse: resolveUniverse, simpleUniverseReady: universeReady, SIMPLE_STRATEGIES: STRATEGIES, simpleWithMarketFilter: withMarketFilter, SIMPLE_PERIODS: PERIODS, SIMPLE_MAX_YEARS: MAX_YEARS, simplePeriod: periodFor, simpleRangeForYears: rangeForYears, SIMPLE_CAPITAL: CAPITAL,
     buildSimpleBacktestOptions, summarizeSimpleResult,
   });
 })();
