@@ -117,14 +117,14 @@ window.StockScannerUI = window.StockScannerUI || {};
           return { time, open: data.opens?.[k] ?? data.closes[k], high: data.highs[k], low: data.lows[k], close: data.closes[k] }; });
         chart = renderer.buildPriceChart(host.current, data, times, candles, {
           activeFilters: strategy.entry, activeEntryRules: [], activeExitRules: [], chartTf: '1wk', backtestTrades: [],
-          showExitInfo: false, showVolume: true, showIndicators: true, setCrossInfo: () => {}, priceHeight: host.current.clientHeight || 300,
+          showExitInfo: false, showVolume: true, showIndicators: true, quietLabels: true, setCrossInfo: () => {}, priceHeight: host.current.clientHeight || 300,
         });
         // Un solo panel con todos los osciladores (líneas finas), con el nivel de compra de cada uno y los de venta.
         const el = oscRefs.current[0];
         if(el && oscFilters.length){
           const exits = (strategy.exit || []).flat().filter(x => oscFilters.some(f => f.ind === x.ind && f.params.p === x.params.p) && x.cmpType === 'val');
           const oc = renderer.buildOscChart(el, chart, data, times, '1wk', { activeFilters: oscFilters, activeExitRules: [{ conditions: exits }], showExitInfo: true,
-            oscHeight: el.clientHeight || 130, lineWidth: 1, lineColors: OSC_COLORS });
+            oscHeight: el.clientHeight || 130, lineWidth: 1, lineColors: OSC_COLORS, quietLabels: true });
           if(oc) oscCharts.push(oc);
         }
         // Misma anchura de escala en todos los paneles para que las fechas queden alineadas; sólo el último muestra el eje de fechas.

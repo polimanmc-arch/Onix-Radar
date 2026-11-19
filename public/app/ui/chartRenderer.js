@@ -155,7 +155,10 @@
     try{ chart.remove(); }catch{}
   }
 
-  function applyMaOverlays(priceChart, d, times, activeFilters, chartTf){
+  // Sin etiqueta de valor ni título a la derecha (gráficos más limpios).
+  const QUIET = { lastValueVisible:false, priceLineVisible:false, title:'' };
+
+  function applyMaOverlays(priceChart, d, times, activeFilters, chartTf, quiet=false){
     const colors = getChartColors();
     const drawn=new Set();
     const draw=(f,comparison=false)=>{
@@ -169,7 +172,7 @@
       if(!series.length) return;
       const offset=times.length-series.length;
       const lineData=series.map((v,i)=>({time:times[i+offset],value:v}));
-      priceChart.addLineSeries({color:comparison?colors.mutedLine:colors.ma[f.ind]||colors.ma.WMA,lineWidth:comparison?1:2,lineStyle:comparison?2:0,title:f.ind+'('+f.params.p+')'}).setData(lineData);
+      priceChart.addLineSeries({color:comparison?colors.mutedLine:colors.ma[f.ind]||colors.ma.WMA,lineWidth:comparison?1:2,lineStyle:comparison?2:0,title:f.ind+'('+f.params.p+')',...(quiet?QUIET:{})}).setData(lineData);
     };
     const tfFilters=(activeFilters||[]).filter(f=>f.tf===chartTf);
     tfFilters.forEach(f=>draw(f));
@@ -289,7 +292,8 @@
   }
 
   // ─── OSCILLATOR CHART ───────────────────────────────────────────────────────
-  function buildOscChart(container, priceChart, d, times, chartTf, { activeFilters, activeExitRules, showExitInfo, oscHeight=180, lineWidth=2, lineColors=null }){
+  function buildOscChart(container, priceChart, d, times, chartTf, { activeFilters, activeExitRules, showExitInfo, oscHeight=180, lineWidth=2, lineColors=null, quietLabels=false }){
+    const q=quietLabels?QUIET:{};
     const tfFilters=(activeFilters||[]).filter(f=>f.tf===chartTf);
     const oscFilters=tfFilters.filter(f=>['RSI','STOCH','MACD','ATR'].includes(f.ind));
     if(!oscFilters.length||!container) return null;
@@ -321,9 +325,9 @@
       const offset=times.length-series.length;
       const lineData=series.map((v,i)=>({time:times[i+offset],value:v})).filter(p=>p.time);
       const color=lineColors?.[fi%lineColors.length]||colors.osc[fi%colors.osc.length];
-      oscChart.addLineSeries({color,lineWidth,title:f.ind+'('+f.params.p+')'}).setData(lineData);
+      oscChart.addLineSeries({color,lineWidth,title:f.ind+'('+f.params.p+')',...q}).setData(lineData);
       if(f.cmpType==='val'&&lineData.length>1)
-        oscChart.addLineSeries({color:lineColors?color:colors.levelLine,lineWidth:1,lineStyle:2,title:'Nivel '+f.cmpVal,crosshairMarkerVisible:false}).setData(lineData.map(p=>({time:p.time,value:f.cmpVal})));
+        oscChart.addLineSeries({color:lineColors?color:colors.levelLine,lineWidth:1,lineStyle:2,title:'Nivel '+f.cmpVal,crosshairMarkerVisible:false,...q}).setData(lineData.map(p=>({time:p.time,value:f.cmpVal})));
     });
 
     // Exit rule level lines
@@ -341,9 +345,9 @@
           const offset=times.length-series.length;
           const lineData=series.map((v,i)=>({time:times[i+offset],value:v})).filter(p=>p.time);
           if(lineData.length>1){
-            oscChart.addLineSeries({color:colors.exitLevel,lineWidth:1,lineStyle:2,title:'Exit '+c.cmpVal,crosshairMarkerVisible:false}).setData(lineData.map(p=>({time:p.time,value:c.cmpVal})));
+            oscChart.addLineSeries({color:colors.exitLevel,lineWidth:1,lineStyle:2,title:'Exit '+c.cmpVal,crosshairMarkerVisible:false,...q}).setData(lineData.map(p=>({time:p.time,value:c.cmpVal})));
             if(!oscFilters.some(f=>f.ind===c.ind&&f.params.p===c.params.p))
-              oscChart.addLineSeries({color:colors.exitLine,lineWidth:1,lineStyle:1,title:c.ind+'('+c.params.p+') exit'}).setData(lineData);
+              oscChart.addLineSeries({color:colors.exitLine,lineWidth:1,lineStyle:1,title:c.ind+'('+c.params.p+') exit',...q}).setData(lineData);
           }
         });
       });
@@ -419,6 +423,7 @@
         };
       }).filter(Boolean);
       const volSeries = priceChart.addHistogramSeries({
+        ...(opts.quietLabels ? QUIET : {}),
         priceFormat: { type: 'volume' },
         priceScaleId: '',
       });
@@ -426,7 +431,7 @@
       volSeries.setData(volData);
     }
 
-    if(opts.showIndicators !== false) applyMaOverlays(priceChart, d, times, opts.activeFilters, opts.chartTf);
+    if(opts.showIndicators !== false) applyMaOverlays(priceChart, d, times, opts.activeFilters, opts.chartTf, !!opts.quietLabels);
     if(opts.showStopLine) applyStopLine(priceChart, candles, opts.stopPrice, colors.stopLine);
     applyTradeMarkers(priceChart, candleSeries, candles, opts.backtestTrades);
     attachCrosshairHandler(priceChart, d, times, opts);
