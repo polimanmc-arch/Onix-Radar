@@ -59,7 +59,24 @@ window.StockScannerUI = window.StockScannerUI || {};
     const clearSnapshots = () => snapTx('readwrite', st => st.clear());
     const pruneSnapshots = keep => snapTx('readwrite', st => { const r = st.getAllKeys(); r.onsuccess = () => r.result.forEach(k => { if (!keep.includes(k))
         st.delete(k); }); return r; });
-    const CAPITAL_OPTIONS = [1000, 10000, 100000, 1000000];
+    function brokerOrder(allocations, capital) {
+        const rows = (allocations || []).filter(a => a.price > 0).map(a => {
+            const target = Math.abs(a.weight) * capital;
+            return { ticker: a.ticker, name: a.shortName && a.shortName !== a.ticker ? a.shortName : '', price: a.price, target, shares: Math.floor(target / a.price) };
+        });
+        const spent = () => rows.reduce((t, r) => t + r.shares * r.price, 0);
+        let budget = rows.reduce((t, r) => t + r.target, 0) - spent();
+        for (let guard = 0; guard < 500; guard++) {
+            const pick = rows.filter(r => r.price <= budget + 1e-9).sort((a, b) => (b.target - b.shares * b.price) - (a.target - a.shares * a.price))[0];
+            if (!pick || pick.target - pick.shares * pick.price <= 0)
+                break;
+            pick.shares += 1;
+            budget -= pick.price;
+        }
+        rows.forEach(r => { r.amount = r.shares * r.price; });
+        const invested = spent();
+        return { rows, invested, cash: capital - invested };
+    }
     function Stars({ n, size = 26 }) {
         return React.createElement("span", { className: "simple-stars", "aria-label": `${n} de 3 estrellas`, style: { fontSize: size } }, [0, 1, 2].map(i => React.createElement("span", { key: i, "aria-hidden": "true", className: i < n ? 'on' : 'off' }, "\u2605")));
     }
@@ -249,7 +266,7 @@ window.StockScannerUI = window.StockScannerUI || {};
             React.createElement("svg", { viewBox: "0 0 320 320", role: "img", "aria-label": `${title}: ` + slices.map(sl => `${sl.label} ${pct(sl.weight, 1, false)}`).join(', '), onMouseLeave: () => setHover(null) },
                 React.createElement("circle", { cx: C0, cy: C0, r: R, fill: "none", stroke: "var(--bg-3)", strokeWidth: SW }),
                 slices.map(sl => (React.createElement("circle", { key: sl.key, cx: C0, cy: C0, r: R, fill: "none", stroke: sl.color, strokeWidth: hover === sl.key ? SW + 10 : SW, strokeDasharray: `${Math.max(0, sl.frac * CIRC - (slices.length > 1 ? 2 : 0))} ${CIRC}`, strokeDashoffset: -sl.off * CIRC, transform: `rotate(-90 ${C0} ${C0})`, opacity: hover != null && hover !== sl.key ? 0.45 : 1, className: "simple-donut-slice", tabIndex: 0, onMouseEnter: () => setHover(sl.key), onFocus: () => setHover(sl.key), onBlur: () => setHover(null), onClick: () => setHover(h => h === sl.key ? null : sl.key) },
-                    React.createElement("title", null, `${sl.label}${sl.sub ? ' · ' + sl.sub : ''}: ${pct(sl.weight, 1, false)}${currency ? ' · ' + money(sl.weight * capital, currency) : ''}`)))),
+                    React.createElement("title", null, `${sl.label}${sl.sub ? ' · ' + sl.sub : ''}: ${pct(sl.weight, 1, false)}${currency ? ' · ' + money(sl.weight * capital, currency) : ''}${sl.shares != null ? ` · comprar ${sl.shares} acciones` : ''}`)))),
                 slices.filter(sl => sl.frac >= 0.035).map(sl => {
                     const a = (sl.off + sl.frac / 2) * 2 * Math.PI - Math.PI / 2;
                     const fs = sl.frac >= 0.15 ? 15 : sl.frac >= 0.07 ? 13 : 11;
@@ -259,7 +276,9 @@ window.StockScannerUI = window.StockScannerUI || {};
                     React.createElement("text", { x: C0, y: C0 - 30, textAnchor: "middle", fontSize: "20", fontWeight: "800", fill: "var(--text-0)" }, cut(hs.label, 16)),
                     hs.sub && React.createElement("text", { x: C0, y: C0 - 10, textAnchor: "middle", fontSize: "11.5", fill: "var(--text-2)" }, cut(hs.sub, 26)),
                     React.createElement("text", { x: C0, y: C0 + 18, textAnchor: "middle", fontSize: "24", fontWeight: "800", fill: hs.color }, pct(hs.weight, 1, false)),
-                    currency && React.createElement("text", { x: C0, y: C0 + 40, textAnchor: "middle", fontSize: "14", fill: "var(--text-1)" }, money(hs.weight * capital, currency))) : React.createElement("g", { "aria-hidden": "true" },
+                    currency && React.createElement("text", { x: C0, y: C0 + 40, textAnchor: "middle", fontSize: "12.5", fill: "var(--text-1)" }, hs.shares != null
+                        ? `${hs.shares.toLocaleString('es-ES')} acci${hs.shares === 1 ? 'ón' : 'ones'} · ${money(hs.shares * hs.price, currency)}`
+                        : money(hs.weight * capital, currency))) : React.createElement("g", { "aria-hidden": "true" },
                     React.createElement("text", { x: C0, y: C0 + 2, textAnchor: "middle", fontSize: "40", fontWeight: "800", fill: "var(--text-0)" }, center.value),
                     React.createElement("text", { x: C0, y: C0 + 26, textAnchor: "middle", fontSize: "14", fill: "var(--text-2)" }, center.label),
                     React.createElement("text", { x: C0, y: C0 + 46, textAnchor: "middle", fontSize: "11", fill: "var(--text-3)" }, "pasa el rat\u00F3n por un color")))));
@@ -368,6 +387,8 @@ window.StockScannerUI = window.StockScannerUI || {};
         // Paso 4: portafolio de Markowitz con las mejores candidatas del escáner
         const runPortfolio = () => {
             if (!(run === null || run === void 0 ? void 0 : run.scan) || running)
+                return undefined;
+            if (!(capital > 0))
                 return undefined;
             const { strategy: st, scan: sc } = run;
             const cap = capital;
@@ -478,16 +499,22 @@ window.StockScannerUI = window.StockScannerUI || {};
         const scan = run === null || run === void 0 ? void 0 : run.scan, pf = run === null || run === void 0 ? void 0 : run.portfolio, bt = run === null || run === void 0 ? void 0 : run.backtest;
         const inPortfolio = new Set(((pf === null || pf === void 0 ? void 0 : pf.allocations) || []).map(a => a.ticker));
         const selected = (scan === null || scan === void 0 ? void 0 : scan.passing.some(r => r.ticker === selTicker)) ? selTicker : (_b = scan === null || scan === void 0 ? void 0 : scan.passing[0]) === null || _b === void 0 ? void 0 : _b.ticker;
+        const order = useMemo(() => (pf ? brokerOrder(pf.allocations, (run === null || run === void 0 ? void 0 : run.capital) || 10000) : null), [pf, run === null || run === void 0 ? void 0 : run.capital]);
         const stockItems = useMemo(() => {
             if (!pf)
                 return [];
-            const items = pf.allocations.map(a => ({ key: a.ticker, label: a.ticker, sub: a.shortName && a.shortName !== a.ticker ? a.shortName : sectorEs(a.sector), weight: Math.abs(a.weight) }));
+            const sharesOf = Object.fromEntries(((order === null || order === void 0 ? void 0 : order.rows) || []).map(r => [r.ticker, r]));
+            const items = pf.allocations.map(a => {
+                var _a, _b;
+                return ({ key: a.ticker, label: a.ticker, sub: a.shortName && a.shortName !== a.ticker ? a.shortName : sectorEs(a.sector), weight: Math.abs(a.weight),
+                    shares: (_a = sharesOf[a.ticker]) === null || _a === void 0 ? void 0 : _a.shares, price: (_b = sharesOf[a.ticker]) === null || _b === void 0 ? void 0 : _b.price });
+            });
             const cash = 1 - items.reduce((t, i) => t + i.weight, 0);
             // Con pocas acciones, el límite de 25 % por acción deja parte en efectivo.
             if (cash > 0.01)
                 items.push({ key: 'cash', label: 'Efectivo', sub: 'límite de 25 % por acción', weight: cash, color: 'var(--text-3)' });
             return items;
-        }, [pf]);
+        }, [pf, order]);
         const sectorItems = useMemo(() => ((pf === null || pf === void 0 ? void 0 : pf.sectors) || []).map(sc => ({ key: sc.name, label: sectorEs(sc.name), sub: `${sc.count} acción${sc.count > 1 ? 'es' : ''}`, weight: sc.weight })), [pf]);
         const stockCenter = useMemo(() => ({ value: String((pf === null || pf === void 0 ? void 0 : pf.allocations.length) || 0), label: 'acciones' }), [pf]);
         const sectorCenter = useMemo(() => ({ value: String(((pf === null || pf === void 0 ? void 0 : pf.sectors) || []).length), label: 'sectores' }), [pf]);
@@ -635,14 +662,11 @@ window.StockScannerUI = window.StockScannerUI || {};
                     React.createElement("p", null,
                         React.createElement("b", null, "Siguiente:"),
                         " con las mejores acciones del esc\u00E1ner, Markowitz busca el reparto del dinero con la mejor rentabilidad por unidad de riesgo."),
-                    React.createElement("div", { className: "simple-periods simple-capital", role: "group", "aria-label": "Dinero a invertir" },
-                        React.createElement("span", null, "Dinero:"),
-                        CAPITAL_OPTIONS.map(v => React.createElement("button", { type: "button", key: v, "aria-pressed": capital === v, onClick: () => setCapital(v) }, v.toLocaleString('es-ES'))),
-                        React.createElement("label", null,
-                            React.createElement("input", { type: "number", min: "100", step: "100", inputMode: "numeric", "aria-label": `Otra cantidad en ${cur}`, value: capital, onChange: e => { const v = Math.round(Number(e.target.value)); if (Number.isFinite(v) && v > 0)
-                                    setCapital(v); } }),
-                            cur)),
-                    React.createElement("button", { type: "button", className: "simple-play", onClick: runPortfolio }, "\u25B6  Paso 4 \u00B7 Construir el portafolio")),
+                    React.createElement("label", { className: "simple-capital" },
+                        React.createElement("span", null, "Dinero a invertir:"),
+                        React.createElement("input", { type: "text", inputMode: "numeric", "aria-label": `Dinero a invertir en ${cur}`, placeholder: "10.000", value: capital ? capital.toLocaleString('es-ES') : '', onChange: e => { const v = Number(e.target.value.replace(/\D/g, '').slice(0, 12)); setCapital(Number.isFinite(v) ? v : 0); } }),
+                        React.createElement("em", null, cur)),
+                    React.createElement("button", { type: "button", className: "simple-play", onClick: runPortfolio, disabled: !(capital > 0) }, "\u25B6  Paso 4 \u00B7 Construir el portafolio")),
                 run.portfolioError && React.createElement("section", { id: "simple-panel-portfolio", className: "simple-panel", "aria-label": "Portafolio" },
                     React.createElement("header", null,
                         React.createElement("span", { className: "simple-panel-n error" }, "4"),
@@ -682,7 +706,32 @@ window.StockScannerUI = window.StockScannerUI || {};
                                     React.createElement("button", { type: "button", "aria-pressed": weightView === 'sector', onClick: () => setWeightView('sector') }, "Por sector"))),
                             weightView === 'stock'
                                 ? React.createElement(Donut, { key: "stock", title: "Peso por acci\u00F3n", currency: cur, capital: run.capital || 10000, center: stockCenter, items: stockItems })
-                                : React.createElement(Donut, { key: "sector", title: "Peso por sector", currency: cur, capital: run.capital || 10000, center: sectorCenter, items: sectorItems })))),
+                                : React.createElement(Donut, { key: "sector", title: "Peso por sector", currency: cur, capital: run.capital || 10000, center: sectorCenter, items: sectorItems }),
+                            weightView === 'stock' && order && React.createElement("div", { className: "simple-order" },
+                                React.createElement("h4", null, `🧾 Orden para el bróker · ${money(run.capital || 10000, cur)}`),
+                                React.createElement("table", { className: "simple-table" },
+                                    React.createElement("thead", null,
+                                        React.createElement("tr", null,
+                                            React.createElement("th", null, "Acci\u00F3n"),
+                                            React.createElement("th", null, "Precio"),
+                                            React.createElement("th", null, "Comprar"),
+                                            React.createElement("th", null, "Importe"))),
+                                    React.createElement("tbody", null, order.rows.map(r => (React.createElement("tr", { key: r.ticker },
+                                        React.createElement("td", { title: r.name },
+                                            React.createElement("b", null, r.ticker)),
+                                        React.createElement("td", null, num(r.price)),
+                                        React.createElement("td", { className: r.shares ? 'up' : 'muted' },
+                                            React.createElement("b", null, r.shares.toLocaleString('es-ES'))),
+                                        React.createElement("td", null, money(r.amount, cur)))))),
+                                    React.createElement("tfoot", null,
+                                        React.createElement("tr", null,
+                                            React.createElement("td", { colSpan: 3 }, "Total invertido"),
+                                            React.createElement("td", null,
+                                                React.createElement("b", null, money(order.invested, cur)))),
+                                        React.createElement("tr", null,
+                                            React.createElement("td", { colSpan: 3 }, "Queda en efectivo"),
+                                            React.createElement("td", null, money(order.cash, cur))))),
+                                React.createElement("small", null, `Acciones enteras al último precio semanal${order.rows.some(r => !r.shares) ? '; con poco dinero algunas acciones no llegan a 1 unidad' : ''}. Lo que no llega a una acción entera queda en efectivo.`))))),
                 (pf || run.portfolioError) && !bt && !run.backtestError && !running && React.createElement("div", { className: "simple-next" },
                     React.createElement("p", null,
                         React.createElement("b", null, "Siguiente:"),
