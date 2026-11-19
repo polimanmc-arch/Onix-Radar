@@ -642,3 +642,24 @@ label.simple-capital em{font-style:normal;font-weight:700;color:var(--text-1)}
 .simple-weighting-row{display:inline-flex;align-items:center;gap:8px;font-size:13px;color:var(--text-2)}
 .simple-weighting-row.head{margin-left:auto;align-self:center}
 .simple-panel>header{flex-wrap:wrap}
+/* Operaciones del backtest */
+.simple-trades{margin:16px 0 10px}
+.simple-trades h3{margin:0 0 8px;font-size:15px;color:var(--text-0)}
+.simple-trades-scroll{max-height:380px;overflow:auto;overscroll-behavior:contain;border:1px solid var(--border);border-radius:14px}
+.simple-trades-scroll thead th{position:sticky;top:0;z-index:1;background:var(--bg-1)}
+.simple-trades .simple-table th,.simple-trades .simple-table td{padding:6px 10px;font-size:12.5px;white-space:nowrap;font-variant-numeric:tabular-nums}
+.simple-trades td.why{color:var(--text-2);white-space:normal;min-width:140px}
+.simple-trades-scroll:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
+/* Ventana con el gráfico de una acción (fondo desenfocado) */
+.simple-modal-back{position:fixed;inset:0;z-index:300;display:grid;place-items:center;padding:16px;background:rgba(8,9,13,.45);backdrop-filter:blur(8px);-webkit-backdrop-filter:blur(8px);animation:simple-fade .15s ease}
+@keyframes simple-fade{from{opacity:0}to{opacity:1}}
+.simple-modal{position:relative;width:min(760px,100%);max-height:calc(100vh - 32px);overflow:auto;padding:18px;border-radius:24px;background:var(--bg-1);border:1px solid var(--border);box-shadow:0 30px 80px -20px rgba(0,0,0,.6)}
+.simple-modal .simple-candles{position:static;border:0;padding:0;background:transparent}
+.simple-modal-close{position:absolute;top:12px;right:12px;z-index:2;width:36px;height:36px;border-radius:50%;border:1px solid var(--border);background:var(--bg-2);color:var(--text-0);font:400 22px/1 var(--font-body);cursor:pointer}
+.simple-modal-close:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
+.simple-modal-facts{display:flex;flex-wrap:wrap;gap:8px;margin:0 48px 10px 0}
+.simple-modal-facts span{padding:4px 12px;border-radius:999px;background:var(--bg-2);font-size:12.5px;color:var(--text-1)}
+.simple-modal-facts b{color:var(--text-0)}
+[data-theme="light"] .simple-modal-back{background:rgba(255,255,255,.35)}
+@media(prefers-reduced-motion:reduce){.simple-modal-back{animation:none}}
+.simple-donut-slice[role="button"]{cursor:pointer}

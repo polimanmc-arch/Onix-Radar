@@ -10,6 +10,9 @@ window.StockScannerUI = window.StockScannerUI || {};
   const money = (v, cur) => (Number.isFinite(v) ? Math.round(v).toLocaleString('es-ES') : '—') + ' ' + cur;
   const pct = (v, d = 1, sign = true) => (Number.isFinite(v) ? (sign && v >= 0 ? '+' : '') + (v * 100).toFixed(d).replace('.', ',') + ' %' : '—');
   const num = (v, d = 2) => (Number.isFinite(v) ? v.toFixed(d).replace('.', ',') : '—');
+  const dayMonthYear = t => (t ? new Date(t * 1000).toLocaleDateString('es-ES', { day: '2-digit', month: 'short', year: '2-digit' }) : '—');
+  const exitReason = r => (!r ? '—' : /regimen de mercado/i.test(r) ? 'Filtro S&P 500 bajista' : /^(Short )?Regla/.test(r) ? 'Reglas de venta'
+    : /índice/i.test(r) ? 'Salió del índice' : /^Stop/.test(r) ? 'Stop de pérdidas' : /fin|final|abierta/i.test(r) ? 'Fin del periodo' : r);
   const year = t => (t ? new Date(t * 1000).getFullYear() : '');
   const monthYear = t => (t ? new Date(t * 1000).toLocaleDateString('es-ES', { month: 'long', year: 'numeric' }) : '');
   const SECTOR_ES = { Technology: 'Tecnología', 'Financial Services': 'Financiero', Healthcare: 'Salud', 'Consumer Cyclical': 'Consumo cíclico',
@@ -272,7 +275,7 @@ window.StockScannerUI = window.StockScannerUI || {};
   // encima; al pasar el ratón (o tocar) el centro muestra el nombre, el % y el dinero.
   const DONUT_COLORS = ['#5b8cff', '#2ec4a6', '#f5a623', '#e8577c', '#9b6dff', '#3fb8e6', '#8bc34a', '#ff7a45', '#d4b106', '#c06fd6', '#4dd0a0', '#ef6461'];
   const cut = (t, n) => (t && t.length > n ? t.slice(0, n - 1) + '…' : t || '');
-  const Donut = memo(function Donut({ items, title, center, currency, capital = 10000 }){
+  const Donut = memo(function Donut({ items, title, center, currency, capital = 10000, onPick = null }){
     const [hover, setHover] = useState(null);
     const C0 = 160, R = 112, SW = 60, CIRC = 2 * Math.PI * R;
     const total = items.reduce((t, i) => t + i.weight, 0) || 1;
@@ -289,7 +292,9 @@ window.StockScannerUI = window.StockScannerUI || {};
               strokeDasharray={`${Math.max(0, sl.frac * CIRC - (slices.length > 1 ? 2 : 0))} ${CIRC}`} strokeDashoffset={-sl.off * CIRC}
               transform={`rotate(-90 ${C0} ${C0})`} opacity={hover != null && hover !== sl.key ? 0.45 : 1} className="simple-donut-slice"
               tabIndex={0} onMouseEnter={() => setHover(sl.key)} onFocus={() => setHover(sl.key)} onBlur={() => setHover(null)}
-              onClick={() => setHover(h => h === sl.key ? null : sl.key)}>
+              onClick={() => (onPick && sl.key !== 'cash' ? onPick(sl.key) : setHover(h => h === sl.key ? null : sl.key))}
+              onKeyDown={e => { if(onPick && sl.key !== 'cash' && (e.key === 'Enter' || e.key === ' ')){ e.preventDefault(); onPick(sl.key); } }}
+              role={onPick && sl.key !== 'cash' ? 'button' : undefined} aria-label={onPick && sl.key !== 'cash' ? `Ver el gráfico de ${sl.label}` : undefined}>
               <title>{`${sl.label}${sl.sub ? ' · ' + sl.sub : ''}: ${pct(sl.weight, 1, false)}${currency ? ' · ' + money(sl.weight * capital, currency) : ''}${sl.shares != null ? ` · comprar ${sl.shares} acciones` : ''}`}</title>
             </circle>))}
           {slices.filter(sl => sl.frac >= 0.035).map(sl => {
@@ -338,6 +343,15 @@ window.StockScannerUI = window.StockScannerUI || {};
     const [rankMsg, setRankMsg] = useState(null);
     const [compareIds, setCompareIds] = useState([]);
     const [weighting, setWeighting] = useState('markowitz'); // reparto del portafolio y del backtest
+    const [modalTicker, setModalTicker] = useState(null); // acción abierta desde la dona
+    const modalClose = useRef(null);
+    useEffect(() => {
+      if(!modalTicker || typeof document === 'undefined') return undefined;
+      const onKey = e => { if(e.key === 'Escape') setModalTicker(null); };
+      document.addEventListener('keydown', onKey);
+      setTimeout(() => modalClose.current?.focus?.(), 30);
+      return () => document.removeEventListener('keydown', onKey);
+    }, [modalTicker]);
     const [compareData, setCompareData] = useState({});
     const cacheRef = useRef({});
     const abortRef = useRef(null);
@@ -460,7 +474,10 @@ window.StockScannerUI = window.StockScannerUI || {};
           },
         });
         const summary = raw && C.summarizeSimpleResult(raw, { capital: cfg.capital });
-        const backtest = summary ? { summary, annReturn: raw.annReturn, sharpe: raw.sharpe, commissions: raw.totalCommissionPaid } : null;
+        // Operaciones realizadas (las más recientes primero), con lo justo para la tabla.
+        const trades = (raw?.allTrades || []).map(t => ({ ticker: t.ticker, entryTime: t.entryTime, exitTime: t.exitTime, entryPrice: t.entryPrice, exitPrice: t.exitPrice,
+          shares: t.shares, returnPct: t.returnPct, pnl: t.pnl, weeks: Math.abs(t.duration || 0), reason: t.reason || '' })).sort((a, b) => (b.exitTime || 0) - (a.exitTime || 0));
+        const backtest = summary ? { summary, annReturn: raw.annReturn, sharpe: raw.sharpe, commissions: raw.totalCommissionPaid, trades } : null;
         setRun(r => ({ ...r, period, btWeighting: cfg.weighting, backtest, backtestError: backtest ? null : (out?.message || 'No hubo datos suficientes para el backtest.') }));
         if(summary){
           const game = { id: Date.now(), market: cfg.market.name, flag: cfg.market.icon, strategy: cfg.strategy.name + (run.tag || '') + (cfg.weighting === 'equal' ? ' · reparto igual' : ''), icon: cfg.strategy.icon, period: period.label, capital: cfg.capital, ret: summary.ret, benchRet: summary.benchRet, stars: summary.stars, saved: false };
@@ -549,6 +566,23 @@ window.StockScannerUI = window.StockScannerUI || {};
 
     return (
       <div className="simple-mode">
+        {modalTicker && run && (() => {
+          const it = stockItems.find(x => x.key === modalTicker);
+          const data = run.prices?.[modalTicker] || cacheRef.current[modalTicker]?.['1wk'];
+          return <div className="simple-modal-back" role="presentation" onClick={e => { if(e.target === e.currentTarget) setModalTicker(null); }}>
+            <div className="simple-modal" role="dialog" aria-modal="true" aria-label={`Gráfico de ${modalTicker}`}>
+              <button type="button" ref={modalClose} className="simple-modal-close" onClick={() => setModalTicker(null)} aria-label="Cerrar">×</button>
+              {it && <div className="simple-modal-facts">
+                {it.sub && <span>{it.sub}</span>}
+                <span><b>{pct(it.weight, 1, false)}</b> del dinero</span>
+                {run.capital > 0 && <span><b>{money(it.weight * run.capital, cur)}</b></span>}
+                {it.shares != null && <span><b>{it.shares.toLocaleString('es-ES')}</b>{` acci${it.shares === 1 ? 'ón' : 'ones'} a ${num(it.price)} ${cur}`}</span>}
+              </div>}
+              {data?.ok ? <SimpleCandles ticker={modalTicker} data={data} strategy={run.strategy} currency={cur} row={run.scan?.passing.find(r => r.ticker === modalTicker)}/>
+                : <p className="simple-note">No hay precios guardados de esta acción.</p>}
+            </div>
+          </div>;
+        })()}
         <section className="simple-hero">
           <h1>Radar Onix · Simulador de inversión</h1>
           <p>Del escáner al portafolio: elige un mercado y una estrategia y sigue el proceso completo con datos reales.</p>
@@ -710,7 +744,7 @@ window.StockScannerUI = window.StockScannerUI || {};
                   </div>
                 </div>
                 {weightView === 'stock'
-                  ? <Donut key="stock" title="Peso por acción" currency={cur} capital={run.capital || 0} center={stockCenter} items={stockItems}/>
+                  ? <Donut key="stock" title="Peso por acción" currency={cur} capital={run.capital || 0} center={stockCenter} items={stockItems} onPick={setModalTicker}/>
                   : <Donut key="sector" title="Peso por sector" currency={cur} capital={run.capital || 0} center={sectorCenter} items={sectorItems}/>}
               </div>
             </div>
@@ -770,6 +804,24 @@ window.StockScannerUI = window.StockScannerUI || {};
               <div><span>Operaciones ganadoras</span><strong>{bt.summary.winRate != null ? Math.round(bt.summary.winRate * 100) + ' %' : '—'}</strong></div>
               <div><span>Comisiones pagadas</span><strong>{money(bt.commissions, cur)}</strong></div>
             </div>
+            {bt.trades?.length > 0 && <div className="simple-trades">
+              <h3>{`📋 Operaciones realizadas · ${bt.trades.length}`}</h3>
+              <div className="simple-table-wrap simple-trades-scroll" tabIndex={0} aria-label="Operaciones del backtest">
+                <table className="simple-table">
+                  <thead><tr><th>Acción</th><th>Compra</th><th>Precio compra</th><th>Venta</th><th>Precio venta</th><th>Semanas</th><th>Resultado</th><th>Ganancia</th><th>Motivo de la venta</th></tr></thead>
+                  <tbody>{bt.trades.map((t, i) => (
+                    <tr key={i}>
+                      <td><b>{t.ticker}</b></td>
+                      <td>{dayMonthYear(t.entryTime)}</td><td>{num(t.entryPrice)}</td>
+                      <td>{dayMonthYear(t.exitTime)}</td><td>{num(t.exitPrice)}</td>
+                      <td>{t.weeks}</td>
+                      <td className={t.returnPct >= 0 ? 'up' : 'down'}>{pct(t.returnPct / 100)}</td>
+                      <td className={t.pnl >= 0 ? 'up' : 'down'}>{money(t.pnl, cur)}</td>
+                      <td className="why" title={t.reason}>{exitReason(t.reason)}</td>
+                    </tr>))}</tbody>
+                </table>
+              </div>
+            </div>}
             <div className="simple-stars-help"><span>⭐ ganar dinero</span><span>⭐ ganar al mercado</span><span>⭐ caer menos que el mercado</span></div>
           </section>}
           {running && <div id="simple-loading" className="simple-loading" role="status" aria-live="polite">
