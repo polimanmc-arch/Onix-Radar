@@ -89,6 +89,14 @@ window.StockScannerUI = window.StockScannerUI || {};
   const AUTHOR_LINKEDIN = 'https://www.linkedin.com/in/diego-rafael-santos-de-la-rosa-56635220b/';
   const AUTHOR_EMAIL = 'diegosantosdelarosa@gmail.com';
 
+  // Cómo repartir el dinero: Markowitz (máximo Sharpe) o lo mismo en cada acción.
+  function WeightingSwitch({ value, onChange, disabled }){
+    return <div className="simple-switch simple-weighting" role="group" aria-label="Cómo repartir el dinero">
+      <button type="button" aria-pressed={value !== 'equal'} onClick={() => onChange('markowitz')} disabled={disabled}>Markowitz</button>
+      <button type="button" aria-pressed={value === 'equal'} onClick={() => onChange('equal')} disabled={disabled}>Igual para todas</button>
+    </div>;
+  }
+
   function Stars({ n, size = 26 }){
     return <span className="simple-stars" aria-label={`${n} de 3 estrellas`} style={{ fontSize: size }}>
       {[0, 1, 2].map(i => <span key={i} aria-hidden="true" className={i < n ? 'on' : 'off'}>★</span>)}
@@ -143,12 +151,12 @@ window.StockScannerUI = window.StockScannerUI || {};
   });
 
   // Frontera eficiente: miles de combinaciones de pesos (riesgo, rentabilidad) y el portafolio elegido.
-  const FrontierChart = memo(function FrontierChart({ portfolio }){
+  const FrontierChart = memo(function FrontierChart({ portfolio, equal = false }){
     // Como mucho ~900 puntos: el dibujo es igual y el SVG pesa mucho menos.
     const all = (portfolio.frontier || []).filter(p => Number.isFinite(p.vol) && Number.isFinite(p.ret));
     const step = Math.max(1, Math.ceil(all.length / 900));
     const pts = step > 1 ? all.filter((_, i) => i % step === 0) : all;
-    const chosen = portfolio.chosenPoint, ew = portfolio.altEqualWeightPoint;
+    const chosen = portfolio.chosenPoint, ew = equal ? portfolio.altSharpePoint : portfolio.altEqualWeightPoint;
     if(pts.length < 5 || !chosen) return null;
     const W = 460, H = 280, padL = 46, padR = 12, padT = 12, padB = 36;
     const xs = [...pts.map(p => p.vol), chosen.vol], ys = [...pts.map(p => p.ret), chosen.ret];
@@ -175,8 +183,8 @@ window.StockScannerUI = window.StockScannerUI || {};
         </svg>
         <figcaption className="simple-legend">
           <span><i style={{ background: 'var(--accent)', opacity: .6 }}/>Combinaciones probadas</span>
-          <span><b style={{ color: '#f5c542' }}>★</b> Máximo Sharpe (elegido)</span>
-          {ew && <span><i className="ring"/>Mismo peso en todas</span>}
+          <span><b style={{ color: '#f5c542' }}>★</b>{equal ? ' Mismo peso en todas (elegido)' : ' Máximo Sharpe (elegido)'}</span>
+          {ew && <span><i className="ring"/>{equal ? 'Máximo Sharpe (Markowitz)' : 'Mismo peso en todas'}</span>}
         </figcaption>
       </figure>
     );
@@ -329,6 +337,7 @@ window.StockScannerUI = window.StockScannerUI || {};
     const [capital, setCapital] = useState(10000); // dinero a invertir (paso 4), también el del backtest
     const [rankMsg, setRankMsg] = useState(null);
     const [compareIds, setCompareIds] = useState([]);
+    const [weighting, setWeighting] = useState('markowitz'); // reparto del portafolio y del backtest
     const [compareData, setCompareData] = useState({});
     const cacheRef = useRef({});
     const abortRef = useRef(null);
@@ -408,27 +417,28 @@ window.StockScannerUI = window.StockScannerUI || {};
     };
 
     // Paso 4: portafolio de Markowitz con las mejores candidatas del escáner
-    const runPortfolio = () => {
+    const runPortfolio = (mode = weighting) => {
       if(!run?.scan || running) return undefined;
       if(!(capital > 0)) return undefined;
       const { strategy: st, scan: sc } = run;
       const cap = capital;
+      setWeighting(mode);
       return runStep('portfolio', async () => {
-        setProgress('Probando 10.000 combinaciones de pesos');
+        setProgress(mode === 'equal' ? 'Repartiendo el dinero a partes iguales' : 'Probando 10.000 combinaciones de pesos');
         let portfolio = null, portfolioError = null;
         if(sc.passing.length >= 2){
           const fetchSectors = async list => { try{ const r = await fetch('/api/sectors?symbols=' + encodeURIComponent(list.join(','))); return r.ok ? r.json() : {}; }catch{ return {}; } };
-          const out = await C.buildPortfolioWorkflow({ ...C.buildSimplePortfolioOptions({ strategy: st, candidates: sc.passing, cacheRef, fetchSectors, capital: cap }), setPortfolio: p => { portfolio = p; } });
+          const out = await C.buildPortfolioWorkflow({ ...C.buildSimplePortfolioOptions({ strategy: st, candidates: sc.passing, cacheRef, fetchSectors, capital: cap, weighting: mode }), setPortfolio: p => { portfolio = p; } });
           if(!out?.ok) portfolioError = out?.message || 'No se pudo construir el portafolio.';
         }else portfolioError = 'Hoy no hay suficientes acciones que cumplan la estrategia para construir un portafolio (hacen falta al menos 2).';
-        setRun(r => ({ ...r, capital: cap, portfolio, portfolioError }));
+        setRun(r => ({ ...r, capital: cap, weighting: mode, portfolio, portfolioError }));
       });
     };
 
     // Paso 5: backtest de la estrategia
     const runBacktest = () => {
       if(!run?.scan || running) return undefined;
-      const cfg = { market: run.market, strategy: run.strategy, period, capital: run.capital || capital };
+      const cfg = { market: run.market, strategy: run.strategy, period, capital: run.capital || capital, weighting: run.weighting || weighting };
       return runStep('backtest', async ac => {
         setProgress('Preparando el backtest');
         // Más de 3 años: hacen falta 10 años de precios semanales (sólo se descargan una vez).
@@ -451,18 +461,18 @@ window.StockScannerUI = window.StockScannerUI || {};
         });
         const summary = raw && C.summarizeSimpleResult(raw, { capital: cfg.capital });
         const backtest = summary ? { summary, annReturn: raw.annReturn, sharpe: raw.sharpe, commissions: raw.totalCommissionPaid } : null;
-        setRun(r => ({ ...r, period, backtest, backtestError: backtest ? null : (out?.message || 'No hubo datos suficientes para el backtest.') }));
+        setRun(r => ({ ...r, period, btWeighting: cfg.weighting, backtest, backtestError: backtest ? null : (out?.message || 'No hubo datos suficientes para el backtest.') }));
         if(summary){
-          const game = { id: Date.now(), market: cfg.market.name, flag: cfg.market.icon, strategy: cfg.strategy.name + (run.tag || ''), icon: cfg.strategy.icon, period: period.label, capital: cfg.capital, ret: summary.ret, benchRet: summary.benchRet, stars: summary.stars, saved: false };
+          const game = { id: Date.now(), market: cfg.market.name, flag: cfg.market.icon, strategy: cfg.strategy.name + (run.tag || '') + (cfg.weighting === 'equal' ? ' · reparto igual' : ''), icon: cfg.strategy.icon, period: period.label, capital: cfg.capital, ret: summary.ret, benchRet: summary.benchRet, stars: summary.stars, saved: false };
           // Foto completa de la partida: resultados + velas de las acciones de la tabla.
           try{
             const prices = {};
-            run.scan.passing.slice(0, 12).forEach(r => { const d = cacheRef.current[r.ticker]?.['1wk'];
+            run.scan.passing.slice(0, 60).forEach(r => { const d = cacheRef.current[r.ticker]?.['1wk'];
               if(d?.ok) prices[r.ticker] = { ticker: r.ticker, tf: '1wk', ok: true, opens: d.opens, highs: d.highs, lows: d.lows, closes: d.closes, volumes: d.volumes, times: d.times, price: d.price, prevClose: d.prevClose }; });
             const pfSnap = run.portfolio ? { ...run.portfolio, correlationMatrix: null, equityCurve: null,
               frontier: (run.portfolio.frontier || []).filter((_, i, a) => i % Math.max(1, Math.ceil(a.length / 900)) === 0) } : null;
             const snap = JSON.parse(JSON.stringify({ v: 1, savedAt: game.id, marketId: cfg.market.id, strategyId: cfg.strategy.id, mktOn: !!run.mktOn, tag: run.tag || '',
-              period, capital: cfg.capital, scan: run.scan, portfolio: pfSnap, portfolioError: run.portfolioError || null, backtest, prices }));
+              period, capital: cfg.capital, weighting: cfg.weighting, scan: run.scan, portfolio: pfSnap, portfolioError: run.portfolioError || null, backtest, prices }));
             await saveSnapshot(game.id, snap); game.saved = true;
           }catch(e){ console.warn('Onix modo simple: no se pudo guardar la partida completa', e); }
           setGames(prev => { const next = [game, ...prev].slice(0, 30); saveGames(next); pruneSnapshots(next.map(g => g.id)).catch(() => {}); return next; });
@@ -481,9 +491,10 @@ window.StockScannerUI = window.StockScannerUI || {};
       setMarketId(mk.id); setStrategyId(base.id); setMktFilter(m => ({ ...m, [base.id]: snap.mktOn }));
       if(snap.period?.years) setYears(snap.period.years);
       if(snap.capital) setCapital(snap.capital);
+      setWeighting(snap.weighting || 'markowitz');
       setRun({ market: mk, strategy: C.simpleWithMarketFilter(base, snap.mktOn), tag: snap.tag, mktOn: snap.mktOn, period: snap.period, capital: snap.capital,
         scan: snap.scan, portfolio: snap.portfolio, portfolioError: snap.portfolioError, backtest: snap.backtest, backtestError: null,
-        prices: snap.prices, savedAt: snap.savedAt, gameId: g.id });
+        prices: snap.prices, savedAt: snap.savedAt, gameId: g.id, weighting: snap.weighting || 'markowitz', btWeighting: snap.weighting || 'markowitz' });
       scrollSoon('simple-panel-scan');
     };
 
@@ -642,11 +653,12 @@ window.StockScannerUI = window.StockScannerUI || {};
               <div><span>Del mercado</span><strong>{scan.analyzed ? pct(scan.passing.length / scan.analyzed, 0, false) : '—'}</strong></div>
             </div>
             {scan.passing.length ? <div className="simple-scan-grid">
-              <div className="simple-table-wrap"><table className="simple-table simple-table-pick">
+              {/* Todas las acciones, en una lista con su propia barra: no pasa de la altura del gráfico. */}
+              <div className="simple-scan-left"><div className="simple-table-wrap simple-table-scroll" tabIndex={0} aria-label="Acciones que cumplen la estrategia"><table className="simple-table simple-table-pick">
                 <thead><tr><th>Acción</th><th>Precio</th><th>Semana</th>
                   {run.strategy.columns.map(col => <th key={col.label} title={col.hint}>{col.label}</th>)}
                   <th title="Rentabilidad por unidad de riesgo en el último año">Sharpe 1a</th><th title="Elegida por el optimizador de Markowitz">Cartera</th></tr></thead>
-                <tbody>{scan.passing.slice(0, 12).map((r, i) => (
+                <tbody>{scan.passing.slice(0, 1000).map((r, i) => (
                   <tr key={r.ticker} tabIndex={0} aria-selected={r.ticker === selected} className={r.ticker === selected ? 'sel' : ''}
                     onClick={() => setSelTicker(r.ticker)} onKeyDown={e => { if(e.key === 'Enter' || e.key === ' '){ e.preventDefault(); setSelTicker(r.ticker); } }}>
                     <td className="tk" title={r.ticker}><b>{r.ticker}</b></td><td>{r.price >= 1000 ? Math.round(r.price).toLocaleString('es-ES') : num(r.price)}</td>
@@ -655,8 +667,8 @@ window.StockScannerUI = window.StockScannerUI || {};
                     <td>{num(r.sharpe1y)}</td>
                     <td>{inPortfolio.has(r.ticker) && <span className="simple-tag" title="En cartera" aria-label="En cartera">✓</span>}</td>
                   </tr>))}</tbody>
-              </table>
-              <p className="simple-note">{`Haz clic en una fila para ver su gráfico.${scan.passing.length > 12 ? ` Y ${scan.passing.length - 12} acciones más.` : ''} Las ${Math.min(scan.passing.length, C.SIMPLE_CANDIDATES)} con mejor Sharpe del último año pasan al optimizador.`}</p></div>
+              </table></div>
+              <p className="simple-note">{`${scan.passing.length} acciones · haz clic en una fila para ver su gráfico${scan.passing.length > 10 ? ' (usa la rueda del ratón para ver más)' : ''}. Las ${Math.min(scan.passing.length, C.SIMPLE_CANDIDATES)} con mejor Sharpe del último año pasan al optimizador.`}</p></div>
               {selected && <SimpleCandles ticker={selected} data={run.prices ? run.prices[selected] : cacheRef.current[selected]?.['1wk']} strategy={run.strategy} currency={cur}
                 row={scan.passing.find(r => r.ticker === selected)}/>}
             </div>
@@ -665,14 +677,20 @@ window.StockScannerUI = window.StockScannerUI || {};
           {scan && !pf && !run.portfolioError && !running && <div className="simple-next">
             <p><b>Siguiente:</b> con las mejores acciones del escáner, Markowitz busca el reparto del dinero con la mejor rentabilidad por unidad de riesgo.</p>
             <CapitalInput value={capital} onChange={setCapital} cur={cur}/>
-            <button type="button" className="simple-play" onClick={runPortfolio} disabled={!(capital > 0)}>▶  Paso 4 · Construir el portafolio</button>
+            <div className="simple-weighting-row"><span>Reparto:</span><WeightingSwitch value={weighting} onChange={setWeighting}/></div>
+            <button type="button" className="simple-play" onClick={() => runPortfolio()} disabled={!(capital > 0)}>▶  Paso 4 · Construir el portafolio</button>
           </div>}
 
           {run.portfolioError && <section id="simple-panel-portfolio" className="simple-panel" aria-label="Portafolio"><header><span className="simple-panel-n error">4</span><div><h2>Portafolio de Markowitz</h2><p>{run.portfolioError}</p></div></header></section>}
           {pf && <section id="simple-panel-portfolio" className="simple-panel" aria-label="Portafolio de Markowitz">
             <header><span className={'simple-panel-n' + (done('portfolio') ? ' done' : '')}>4</span><div>
-              <h2>Portafolio de Markowitz · ¿cuánto invertir en cada acción?</h2>
-              <p>El optimizador prueba miles de combinaciones de pesos con las rentabilidades y correlaciones históricas y elige la de máximo Sharpe: la mejor rentabilidad por unidad de riesgo. Máximo 10 acciones y 25 % por acción.</p>
+              <h2>{run.weighting === 'equal' ? 'Portafolio · reparto igual para todas' : 'Portafolio de Markowitz · ¿cuánto invertir en cada acción?'}</h2>
+              <p>{run.weighting === 'equal'
+                ? 'Se toman las mejores acciones del escáner (hasta 10, sin las muy correlacionadas) y cada una recibe la misma parte del dinero. La estrella muestra dónde queda ese reparto frente a las combinaciones de Markowitz.'
+                : 'El optimizador prueba miles de combinaciones de pesos con las rentabilidades y correlaciones históricas y elige la de máximo Sharpe: la mejor rentabilidad por unidad de riesgo. Máximo 10 acciones y 25 % por acción.'}</p>
+            </div>
+            <div className="simple-weighting-row head"><span>Reparto:</span>
+              <WeightingSwitch value={run.weighting || 'markowitz'} disabled={running} onChange={m => { if(m !== (run.weighting || 'markowitz')) runPortfolio(m); }}/>
             </div></header>
             <div className="simple-kpis">
               <div><span>Rentabilidad esperada</span><strong>{pct(pf.chosenPoint.ret / 100)}</strong><small>anual, histórica</small></div>
@@ -681,7 +699,7 @@ window.StockScannerUI = window.StockScannerUI || {};
               <div><span>Acciones</span><strong>{pf.allocations.length}</strong><small>{`de ${Math.min(scan?.passing.length || 0, C.SIMPLE_CANDIDATES)} candidatas`}</small></div>
             </div>
             <div className="simple-portfolio-grid">
-              <FrontierChart portfolio={pf}/>
+              <FrontierChart portfolio={pf} equal={run.weighting === 'equal'}/>
               <div className="simple-weights">
                 <div className="simple-weights-head">
                   <h3>Reparto del dinero</h3>
@@ -707,13 +725,15 @@ window.StockScannerUI = window.StockScannerUI || {};
           {bt && <section id="simple-panel-backtest" className="simple-panel simple-result" aria-label="Resultado del backtest">
             <header><span className={'simple-panel-n' + (done('backtest') ? ' done' : '')}>5</span><div>
               <h2>Backtest · ¿habría funcionado en el pasado?</h2>
-              <p>{`${run.period?.label ? 'Periodo: ' + run.period.label + '. ' : ''}La estrategia se aplica semana a semana desde ${monthYear(bt.summary.start)} con ${money(bt.summary.capital, cur)}: compra cuando se cumplen las reglas, vende cuando se cumplen las de salida, reparte el dinero según rentabilidad/riesgo y descuenta comisiones.`}</p>
+              <p>{`${run.period?.label ? 'Periodo: ' + run.period.label + '. ' : ''}La estrategia se aplica semana a semana desde ${monthYear(bt.summary.start)} con ${money(bt.summary.capital, cur)}: compra cuando se cumplen las reglas, vende cuando se cumplen las de salida, ${run.btWeighting === 'equal' ? 'reparte el dinero a partes iguales entre las posiciones' : 'reparte el dinero según rentabilidad/riesgo'} y descuenta comisiones.`}</p>
             </div></header>
             {(() => {
               // Cambiar los años (o el dinero) y repetir el backtest sin rehacer los pasos anteriores.
               const capChanged = run.capital > 0 && run.capital !== bt.summary.capital;
+              const wLabel = w => (w === 'equal' ? 'reparto igual' : 'reparto Markowitz');
+              const wChanged = (run.weighting || 'markowitz') !== (run.btWeighting || 'markowitz');
               const yearsChanged = run.period?.years && years !== run.period.years;
-              const changes = [yearsChanged && `${period.label} (antes ${run.period.label})`, capChanged && `${money(run.capital, cur)} (antes ${money(bt.summary.capital, cur)})`].filter(Boolean);
+              const changes = [yearsChanged && `${period.label} (antes ${run.period.label})`, capChanged && `${money(run.capital, cur)} (antes ${money(bt.summary.capital, cur)})`, wChanged && `${wLabel(run.weighting)} (antes ${wLabel(run.btWeighting)})`].filter(Boolean);
               return <div className={'simple-rerun' + (changes.length ? ' changed' : '')}>
                 <YearsInput value={years} onChange={setYears} max={C.SIMPLE_MAX_YEARS}/>
                 <span>{changes.length ? `Nuevo backtest: ${changes.join(' · ')}` : 'Cambia los años o el dinero para repetir el backtest.'}</span>

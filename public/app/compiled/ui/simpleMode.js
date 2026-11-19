@@ -98,6 +98,12 @@ window.StockScannerUI = window.StockScannerUI || {};
     // Contacto del autor (vacío = sin botón).
     const AUTHOR_LINKEDIN = 'https://www.linkedin.com/in/diego-rafael-santos-de-la-rosa-56635220b/';
     const AUTHOR_EMAIL = 'diegosantosdelarosa@gmail.com';
+    // Cómo repartir el dinero: Markowitz (máximo Sharpe) o lo mismo en cada acción.
+    function WeightingSwitch({ value, onChange, disabled }) {
+        return React.createElement("div", { className: "simple-switch simple-weighting", role: "group", "aria-label": "C\u00F3mo repartir el dinero" },
+            React.createElement("button", { type: "button", "aria-pressed": value !== 'equal', onClick: () => onChange('markowitz'), disabled: disabled }, "Markowitz"),
+            React.createElement("button", { type: "button", "aria-pressed": value === 'equal', onClick: () => onChange('equal'), disabled: disabled }, "Igual para todas"));
+    }
     function Stars({ n, size = 26 }) {
         return React.createElement("span", { className: "simple-stars", "aria-label": `${n} de 3 estrellas`, style: { fontSize: size } }, [0, 1, 2].map(i => React.createElement("span", { key: i, "aria-hidden": "true", className: i < n ? 'on' : 'off' }, "\u2605")));
     }
@@ -148,12 +154,12 @@ window.StockScannerUI = window.StockScannerUI || {};
                     `${o.label} ${pct(last(o.pts))}`)))));
     });
     // Frontera eficiente: miles de combinaciones de pesos (riesgo, rentabilidad) y el portafolio elegido.
-    const FrontierChart = memo(function FrontierChart({ portfolio }) {
+    const FrontierChart = memo(function FrontierChart({ portfolio, equal = false }) {
         // Como mucho ~900 puntos: el dibujo es igual y el SVG pesa mucho menos.
         const all = (portfolio.frontier || []).filter(p => Number.isFinite(p.vol) && Number.isFinite(p.ret));
         const step = Math.max(1, Math.ceil(all.length / 900));
         const pts = step > 1 ? all.filter((_, i) => i % step === 0) : all;
-        const chosen = portfolio.chosenPoint, ew = portfolio.altEqualWeightPoint;
+        const chosen = portfolio.chosenPoint, ew = equal ? portfolio.altSharpePoint : portfolio.altEqualWeightPoint;
         if (pts.length < 5 || !chosen)
             return null;
         const W = 460, H = 280, padL = 46, padR = 12, padT = 12, padB = 36;
@@ -188,10 +194,10 @@ window.StockScannerUI = window.StockScannerUI || {};
                     "Combinaciones probadas"),
                 React.createElement("span", null,
                     React.createElement("b", { style: { color: '#f5c542' } }, "\u2605"),
-                    " M\u00E1ximo Sharpe (elegido)"),
+                    equal ? ' Mismo peso en todas (elegido)' : ' Máximo Sharpe (elegido)'),
                 ew && React.createElement("span", null,
                     React.createElement("i", { className: "ring" }),
-                    "Mismo peso en todas"))));
+                    equal ? 'Máximo Sharpe (Markowitz)' : 'Mismo peso en todas'))));
     });
     // Gráfico de velas semanales del valor seleccionado en el escáner (mismo motor que el inspector experto).
     // Colores de los osciladores (distintos del amarillo de la media móvil).
@@ -342,6 +348,7 @@ window.StockScannerUI = window.StockScannerUI || {};
         const [capital, setCapital] = useState(10000); // dinero a invertir (paso 4), también el del backtest
         const [rankMsg, setRankMsg] = useState(null);
         const [compareIds, setCompareIds] = useState([]);
+        const [weighting, setWeighting] = useState('markowitz'); // reparto del portafolio y del backtest
         const [compareData, setCompareData] = useState({});
         const cacheRef = useRef({});
         const abortRef = useRef(null);
@@ -447,15 +454,16 @@ window.StockScannerUI = window.StockScannerUI || {};
             });
         };
         // Paso 4: portafolio de Markowitz con las mejores candidatas del escáner
-        const runPortfolio = () => {
+        const runPortfolio = (mode = weighting) => {
             if (!(run === null || run === void 0 ? void 0 : run.scan) || running)
                 return undefined;
             if (!(capital > 0))
                 return undefined;
             const { strategy: st, scan: sc } = run;
             const cap = capital;
+            setWeighting(mode);
             return runStep('portfolio', async () => {
-                setProgress('Probando 10.000 combinaciones de pesos');
+                setProgress(mode === 'equal' ? 'Repartiendo el dinero a partes iguales' : 'Probando 10.000 combinaciones de pesos');
                 let portfolio = null, portfolioError = null;
                 if (sc.passing.length >= 2) {
                     const fetchSectors = async (list) => { try {
@@ -465,20 +473,20 @@ window.StockScannerUI = window.StockScannerUI || {};
                     catch {
                         return {};
                     } };
-                    const out = await C.buildPortfolioWorkflow({ ...C.buildSimplePortfolioOptions({ strategy: st, candidates: sc.passing, cacheRef, fetchSectors, capital: cap }), setPortfolio: p => { portfolio = p; } });
+                    const out = await C.buildPortfolioWorkflow({ ...C.buildSimplePortfolioOptions({ strategy: st, candidates: sc.passing, cacheRef, fetchSectors, capital: cap, weighting: mode }), setPortfolio: p => { portfolio = p; } });
                     if (!(out === null || out === void 0 ? void 0 : out.ok))
                         portfolioError = (out === null || out === void 0 ? void 0 : out.message) || 'No se pudo construir el portafolio.';
                 }
                 else
                     portfolioError = 'Hoy no hay suficientes acciones que cumplan la estrategia para construir un portafolio (hacen falta al menos 2).';
-                setRun(r => ({ ...r, capital: cap, portfolio, portfolioError }));
+                setRun(r => ({ ...r, capital: cap, weighting: mode, portfolio, portfolioError }));
             });
         };
         // Paso 5: backtest de la estrategia
         const runBacktest = () => {
             if (!(run === null || run === void 0 ? void 0 : run.scan) || running)
                 return undefined;
-            const cfg = { market: run.market, strategy: run.strategy, period, capital: run.capital || capital };
+            const cfg = { market: run.market, strategy: run.strategy, period, capital: run.capital || capital, weighting: run.weighting || weighting };
             return runStep('backtest', async (ac) => {
                 var _a;
                 setProgress('Preparando el backtest');
@@ -509,13 +517,13 @@ window.StockScannerUI = window.StockScannerUI || {};
                 });
                 const summary = raw && C.summarizeSimpleResult(raw, { capital: cfg.capital });
                 const backtest = summary ? { summary, annReturn: raw.annReturn, sharpe: raw.sharpe, commissions: raw.totalCommissionPaid } : null;
-                setRun(r => ({ ...r, period, backtest, backtestError: backtest ? null : ((out === null || out === void 0 ? void 0 : out.message) || 'No hubo datos suficientes para el backtest.') }));
+                setRun(r => ({ ...r, period, btWeighting: cfg.weighting, backtest, backtestError: backtest ? null : ((out === null || out === void 0 ? void 0 : out.message) || 'No hubo datos suficientes para el backtest.') }));
                 if (summary) {
-                    const game = { id: Date.now(), market: cfg.market.name, flag: cfg.market.icon, strategy: cfg.strategy.name + (run.tag || ''), icon: cfg.strategy.icon, period: period.label, capital: cfg.capital, ret: summary.ret, benchRet: summary.benchRet, stars: summary.stars, saved: false };
+                    const game = { id: Date.now(), market: cfg.market.name, flag: cfg.market.icon, strategy: cfg.strategy.name + (run.tag || '') + (cfg.weighting === 'equal' ? ' · reparto igual' : ''), icon: cfg.strategy.icon, period: period.label, capital: cfg.capital, ret: summary.ret, benchRet: summary.benchRet, stars: summary.stars, saved: false };
                     // Foto completa de la partida: resultados + velas de las acciones de la tabla.
                     try {
                         const prices = {};
-                        run.scan.passing.slice(0, 12).forEach(r => {
+                        run.scan.passing.slice(0, 60).forEach(r => {
                             var _a;
                             const d = (_a = cacheRef.current[r.ticker]) === null || _a === void 0 ? void 0 : _a['1wk'];
                             if (d === null || d === void 0 ? void 0 : d.ok)
@@ -524,7 +532,7 @@ window.StockScannerUI = window.StockScannerUI || {};
                         const pfSnap = run.portfolio ? { ...run.portfolio, correlationMatrix: null, equityCurve: null,
                             frontier: (run.portfolio.frontier || []).filter((_, i, a) => i % Math.max(1, Math.ceil(a.length / 900)) === 0) } : null;
                         const snap = JSON.parse(JSON.stringify({ v: 1, savedAt: game.id, marketId: cfg.market.id, strategyId: cfg.strategy.id, mktOn: !!run.mktOn, tag: run.tag || '',
-                            period, capital: cfg.capital, scan: run.scan, portfolio: pfSnap, portfolioError: run.portfolioError || null, backtest, prices }));
+                            period, capital: cfg.capital, weighting: cfg.weighting, scan: run.scan, portfolio: pfSnap, portfolioError: run.portfolioError || null, backtest, prices }));
                         await saveSnapshot(game.id, snap);
                         game.saved = true;
                     }
@@ -560,9 +568,10 @@ window.StockScannerUI = window.StockScannerUI || {};
                 setYears(snap.period.years);
             if (snap.capital)
                 setCapital(snap.capital);
+            setWeighting(snap.weighting || 'markowitz');
             setRun({ market: mk, strategy: C.simpleWithMarketFilter(base, snap.mktOn), tag: snap.tag, mktOn: snap.mktOn, period: snap.period, capital: snap.capital,
                 scan: snap.scan, portfolio: snap.portfolio, portfolioError: snap.portfolioError, backtest: snap.backtest, backtestError: null,
-                prices: snap.prices, savedAt: snap.savedAt, gameId: g.id });
+                prices: snap.prices, savedAt: snap.savedAt, gameId: g.id, weighting: snap.weighting || 'markowitz', btWeighting: snap.weighting || 'markowitz' });
             scrollSoon('simple-panel-scan');
         };
         // Comparar: hasta 4 partidas guardadas sobre el gráfico del backtest.
@@ -735,28 +744,29 @@ window.StockScannerUI = window.StockScannerUI || {};
                             React.createElement("span", null, "Del mercado"),
                             React.createElement("strong", null, scan.analyzed ? pct(scan.passing.length / scan.analyzed, 0, false) : '—'))),
                     scan.passing.length ? React.createElement("div", { className: "simple-scan-grid" },
-                        React.createElement("div", { className: "simple-table-wrap" },
-                            React.createElement("table", { className: "simple-table simple-table-pick" },
-                                React.createElement("thead", null,
-                                    React.createElement("tr", null,
-                                        React.createElement("th", null, "Acci\u00F3n"),
-                                        React.createElement("th", null, "Precio"),
-                                        React.createElement("th", null, "Semana"),
-                                        run.strategy.columns.map(col => React.createElement("th", { key: col.label, title: col.hint }, col.label)),
-                                        React.createElement("th", { title: "Rentabilidad por unidad de riesgo en el \u00FAltimo a\u00F1o" }, "Sharpe 1a"),
-                                        React.createElement("th", { title: "Elegida por el optimizador de Markowitz" }, "Cartera"))),
-                                React.createElement("tbody", null, scan.passing.slice(0, 12).map((r, i) => (React.createElement("tr", { key: r.ticker, tabIndex: 0, "aria-selected": r.ticker === selected, className: r.ticker === selected ? 'sel' : '', onClick: () => setSelTicker(r.ticker), onKeyDown: e => { if (e.key === 'Enter' || e.key === ' ') {
-                                        e.preventDefault();
-                                        setSelTicker(r.ticker);
-                                    } } },
-                                    React.createElement("td", { className: "tk", title: r.ticker },
-                                        React.createElement("b", null, r.ticker)),
-                                    React.createElement("td", null, r.price >= 1000 ? Math.round(r.price).toLocaleString('es-ES') : num(r.price)),
-                                    React.createElement("td", { className: r.chg >= 0 ? 'up' : 'down' }, pct(r.chg)),
-                                    r.values.map((v, k) => React.createElement("td", { key: k }, fmtCol(v, run.strategy.columns[k].fmt))),
-                                    React.createElement("td", null, num(r.sharpe1y)),
-                                    React.createElement("td", null, inPortfolio.has(r.ticker) && React.createElement("span", { className: "simple-tag", title: "En cartera", "aria-label": "En cartera" }, "\u2713"))))))),
-                            React.createElement("p", { className: "simple-note" }, `Haz clic en una fila para ver su gráfico.${scan.passing.length > 12 ? ` Y ${scan.passing.length - 12} acciones más.` : ''} Las ${Math.min(scan.passing.length, C.SIMPLE_CANDIDATES)} con mejor Sharpe del último año pasan al optimizador.`)),
+                        React.createElement("div", { className: "simple-scan-left" },
+                            React.createElement("div", { className: "simple-table-wrap simple-table-scroll", tabIndex: 0, "aria-label": "Acciones que cumplen la estrategia" },
+                                React.createElement("table", { className: "simple-table simple-table-pick" },
+                                    React.createElement("thead", null,
+                                        React.createElement("tr", null,
+                                            React.createElement("th", null, "Acci\u00F3n"),
+                                            React.createElement("th", null, "Precio"),
+                                            React.createElement("th", null, "Semana"),
+                                            run.strategy.columns.map(col => React.createElement("th", { key: col.label, title: col.hint }, col.label)),
+                                            React.createElement("th", { title: "Rentabilidad por unidad de riesgo en el \u00FAltimo a\u00F1o" }, "Sharpe 1a"),
+                                            React.createElement("th", { title: "Elegida por el optimizador de Markowitz" }, "Cartera"))),
+                                    React.createElement("tbody", null, scan.passing.slice(0, 1000).map((r, i) => (React.createElement("tr", { key: r.ticker, tabIndex: 0, "aria-selected": r.ticker === selected, className: r.ticker === selected ? 'sel' : '', onClick: () => setSelTicker(r.ticker), onKeyDown: e => { if (e.key === 'Enter' || e.key === ' ') {
+                                            e.preventDefault();
+                                            setSelTicker(r.ticker);
+                                        } } },
+                                        React.createElement("td", { className: "tk", title: r.ticker },
+                                            React.createElement("b", null, r.ticker)),
+                                        React.createElement("td", null, r.price >= 1000 ? Math.round(r.price).toLocaleString('es-ES') : num(r.price)),
+                                        React.createElement("td", { className: r.chg >= 0 ? 'up' : 'down' }, pct(r.chg)),
+                                        r.values.map((v, k) => React.createElement("td", { key: k }, fmtCol(v, run.strategy.columns[k].fmt))),
+                                        React.createElement("td", null, num(r.sharpe1y)),
+                                        React.createElement("td", null, inPortfolio.has(r.ticker) && React.createElement("span", { className: "simple-tag", title: "En cartera", "aria-label": "En cartera" }, "\u2713")))))))),
+                            React.createElement("p", { className: "simple-note" }, `${scan.passing.length} acciones · haz clic en una fila para ver su gráfico${scan.passing.length > 10 ? ' (usa la rueda del ratón para ver más)' : ''}. Las ${Math.min(scan.passing.length, C.SIMPLE_CANDIDATES)} con mejor Sharpe del último año pasan al optimizador.`)),
                         selected && React.createElement(SimpleCandles, { ticker: selected, data: run.prices ? run.prices[selected] : (_c = cacheRef.current[selected]) === null || _c === void 0 ? void 0 : _c['1wk'], strategy: run.strategy, currency: cur, row: scan.passing.find(r => r.ticker === selected) }))
                         : React.createElement("p", { className: "simple-note" }, "Hoy ninguna acci\u00F3n del mercado cumple las reglas: la estrategia esperar\u00EDa.")),
                 scan && !pf && !run.portfolioError && !running && React.createElement("div", { className: "simple-next" },
@@ -764,7 +774,10 @@ window.StockScannerUI = window.StockScannerUI || {};
                         React.createElement("b", null, "Siguiente:"),
                         " con las mejores acciones del esc\u00E1ner, Markowitz busca el reparto del dinero con la mejor rentabilidad por unidad de riesgo."),
                     React.createElement(CapitalInput, { value: capital, onChange: setCapital, cur: cur }),
-                    React.createElement("button", { type: "button", className: "simple-play", onClick: runPortfolio, disabled: !(capital > 0) }, "\u25B6  Paso 4 \u00B7 Construir el portafolio")),
+                    React.createElement("div", { className: "simple-weighting-row" },
+                        React.createElement("span", null, "Reparto:"),
+                        React.createElement(WeightingSwitch, { value: weighting, onChange: setWeighting })),
+                    React.createElement("button", { type: "button", className: "simple-play", onClick: () => runPortfolio(), disabled: !(capital > 0) }, "\u25B6  Paso 4 \u00B7 Construir el portafolio")),
                 run.portfolioError && React.createElement("section", { id: "simple-panel-portfolio", className: "simple-panel", "aria-label": "Portafolio" },
                     React.createElement("header", null,
                         React.createElement("span", { className: "simple-panel-n error" }, "4"),
@@ -775,8 +788,14 @@ window.StockScannerUI = window.StockScannerUI || {};
                     React.createElement("header", null,
                         React.createElement("span", { className: 'simple-panel-n' + (done('portfolio') ? ' done' : '') }, "4"),
                         React.createElement("div", null,
-                            React.createElement("h2", null, "Portafolio de Markowitz \u00B7 \u00BFcu\u00E1nto invertir en cada acci\u00F3n?"),
-                            React.createElement("p", null, "El optimizador prueba miles de combinaciones de pesos con las rentabilidades y correlaciones hist\u00F3ricas y elige la de m\u00E1ximo Sharpe: la mejor rentabilidad por unidad de riesgo. M\u00E1ximo 10 acciones y 25 % por acci\u00F3n."))),
+                            React.createElement("h2", null, run.weighting === 'equal' ? 'Portafolio · reparto igual para todas' : 'Portafolio de Markowitz · ¿cuánto invertir en cada acción?'),
+                            React.createElement("p", null, run.weighting === 'equal'
+                                ? 'Se toman las mejores acciones del escáner (hasta 10, sin las muy correlacionadas) y cada una recibe la misma parte del dinero. La estrella muestra dónde queda ese reparto frente a las combinaciones de Markowitz.'
+                                : 'El optimizador prueba miles de combinaciones de pesos con las rentabilidades y correlaciones históricas y elige la de máximo Sharpe: la mejor rentabilidad por unidad de riesgo. Máximo 10 acciones y 25 % por acción.')),
+                        React.createElement("div", { className: "simple-weighting-row head" },
+                            React.createElement("span", null, "Reparto:"),
+                            React.createElement(WeightingSwitch, { value: run.weighting || 'markowitz', disabled: running, onChange: m => { if (m !== (run.weighting || 'markowitz'))
+                                    runPortfolio(m); } }))),
                     React.createElement("div", { className: "simple-kpis" },
                         React.createElement("div", null,
                             React.createElement("span", null, "Rentabilidad esperada"),
@@ -795,7 +814,7 @@ window.StockScannerUI = window.StockScannerUI || {};
                             React.createElement("strong", null, pf.allocations.length),
                             React.createElement("small", null, `de ${Math.min((scan === null || scan === void 0 ? void 0 : scan.passing.length) || 0, C.SIMPLE_CANDIDATES)} candidatas`))),
                     React.createElement("div", { className: "simple-portfolio-grid" },
-                        React.createElement(FrontierChart, { portfolio: pf }),
+                        React.createElement(FrontierChart, { portfolio: pf, equal: run.weighting === 'equal' }),
                         React.createElement("div", { className: "simple-weights" },
                             React.createElement("div", { className: "simple-weights-head" },
                                 React.createElement("h3", null, "Reparto del dinero"),
@@ -824,13 +843,15 @@ window.StockScannerUI = window.StockScannerUI || {};
                         React.createElement("span", { className: 'simple-panel-n' + (done('backtest') ? ' done' : '') }, "5"),
                         React.createElement("div", null,
                             React.createElement("h2", null, "Backtest \u00B7 \u00BFhabr\u00EDa funcionado en el pasado?"),
-                            React.createElement("p", null, `${((_d = run.period) === null || _d === void 0 ? void 0 : _d.label) ? 'Periodo: ' + run.period.label + '. ' : ''}La estrategia se aplica semana a semana desde ${monthYear(bt.summary.start)} con ${money(bt.summary.capital, cur)}: compra cuando se cumplen las reglas, vende cuando se cumplen las de salida, reparte el dinero según rentabilidad/riesgo y descuenta comisiones.`))),
+                            React.createElement("p", null, `${((_d = run.period) === null || _d === void 0 ? void 0 : _d.label) ? 'Periodo: ' + run.period.label + '. ' : ''}La estrategia se aplica semana a semana desde ${monthYear(bt.summary.start)} con ${money(bt.summary.capital, cur)}: compra cuando se cumplen las reglas, vende cuando se cumplen las de salida, ${run.btWeighting === 'equal' ? 'reparte el dinero a partes iguales entre las posiciones' : 'reparte el dinero según rentabilidad/riesgo'} y descuenta comisiones.`))),
                     (() => {
                         var _a;
                         // Cambiar los años (o el dinero) y repetir el backtest sin rehacer los pasos anteriores.
                         const capChanged = run.capital > 0 && run.capital !== bt.summary.capital;
+                        const wLabel = w => (w === 'equal' ? 'reparto igual' : 'reparto Markowitz');
+                        const wChanged = (run.weighting || 'markowitz') !== (run.btWeighting || 'markowitz');
                         const yearsChanged = ((_a = run.period) === null || _a === void 0 ? void 0 : _a.years) && years !== run.period.years;
-                        const changes = [yearsChanged && `${period.label} (antes ${run.period.label})`, capChanged && `${money(run.capital, cur)} (antes ${money(bt.summary.capital, cur)})`].filter(Boolean);
+                        const changes = [yearsChanged && `${period.label} (antes ${run.period.label})`, capChanged && `${money(run.capital, cur)} (antes ${money(bt.summary.capital, cur)})`, wChanged && `${wLabel(run.weighting)} (antes ${wLabel(run.btWeighting)})`].filter(Boolean);
                         return React.createElement("div", { className: 'simple-rerun' + (changes.length ? ' changed' : '') },
                             React.createElement(YearsInput, { value: years, onChange: setYears, max: C.SIMPLE_MAX_YEARS }),
                             React.createElement("span", null, changes.length ? `Nuevo backtest: ${changes.join(' · ')}` : 'Cambia los años o el dinero para repetir el backtest.'),

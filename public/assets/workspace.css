@@ -627,3 +627,18 @@ label.simple-capital em{font-style:normal;font-weight:700;color:var(--text-1)}
 .simple-compare button[aria-pressed="true"] i{border-color:transparent}
 .simple-compare button:disabled{opacity:.45;cursor:default}
 .simple-compare button:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
+/* Escáner: lista completa con scroll propio, a la altura del gráfico */
+@media(min-width:1001px){
+  .simple-scan-grid{align-items:stretch}
+  .simple-scan-left{position:relative;min-height:320px}
+  .simple-scan-left>.simple-table-scroll{position:absolute;top:0;left:0;right:0;bottom:44px;overflow:auto}
+  .simple-scan-left>.simple-note{position:absolute;left:0;right:0;bottom:0;margin:0}
+}
+@media(max-width:1000px){.simple-table-scroll{max-height:420px;overflow:auto}}
+.simple-table-scroll{overscroll-behavior:contain;scrollbar-width:thin}
+.simple-table-scroll thead th{position:sticky;top:0;z-index:1;background:var(--bg-1)}
+.simple-table-scroll:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
+/* Selector de reparto */
+.simple-weighting-row{display:inline-flex;align-items:center;gap:8px;font-size:13px;color:var(--text-2)}
+.simple-weighting-row.head{margin-left:auto;align-self:center}
+.simple-panel>header{flex-wrap:wrap}

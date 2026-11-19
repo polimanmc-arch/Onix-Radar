@@ -168,7 +168,8 @@
   // añade además todas las acciones de EE. UU. del Nasdaq).
   const explicitUniverse = market => !!(market.tickers || market.exclude || market.heavy);
 
-  function buildSimpleBacktestOptions({ market, strategy, period, capital = CAPITAL }){
+  function buildSimpleBacktestOptions({ market, strategy, period, capital = CAPITAL, weighting = 'markowitz' }){
+    const equal = weighting === 'equal';
     return {
       entryRules: [{ _id: 'g1', conditions: withIds(strategy.entry) }],
       exitRules: strategy.exit.map((g, i) => ({ _id: 'x' + i, conditions: withIds(g) })),
@@ -178,7 +179,8 @@
       btWeeks: period.weeks, btCapital: capital, pfMaxPos: 10, pfRiskFree: 3,
       btBenchmark: market.benchmark, btCommission: 0.1, btSlippage: 0.05,
       // Reparte el capital según la relación rentabilidad/riesgo reciente de cada señal (máx. 25 % por acción).
-      pfStopATRPeriod: 14, pfMinWeight: 2, pfMaxWeight: 25, pfMode: 'maxsharpe', btAllocationMode: 'maxsharpe',
+      // Con reparto igual, cada posición recibe la misma parte del dinero.
+      pfStopATRPeriod: 14, pfMinWeight: 2, pfMaxWeight: 25, pfMode: equal ? 'equalweight' : 'maxsharpe', btAllocationMode: equal ? 'equal' : 'maxsharpe',
       btUniverseSource: explicitUniverse(market) ? 'custom' : market.preset,
       btCustomTickers: explicitUniverse(market) ? universeTickers(market).join(', ') : '',
       btUniverseLimit: 0, savedUniverseLists: [], btLightMemory: false,
@@ -350,12 +352,14 @@
   }
 
   const CANDIDATES = 40;
-  function buildSimplePortfolioOptions({ strategy, candidates, cacheRef, fetchSectors, capital = CAPITAL }){
+  function buildSimplePortfolioOptions({ strategy, candidates, cacheRef, fetchSectors, capital = CAPITAL, weighting = 'markowitz' }){
+    const equal = weighting === 'equal';
     return {
       results: candidates.slice(0, CANDIDATES).map(r => ({ ticker: r.ticker, name: r.ticker, passed: true, direction: 'LONG' })),
       filters: withIds(strategy.entry), shortFilters: [],
-      pfCapital: capital, pfMinWeight: 2, pfMaxWeight: 25, pfMaxPos: 10, pfRiskFree: 3,
-      pfCorFilter: true, pfCorThresh: 0.85, pfMode: 'maxsharpe', pfSims: 10000, pfSeed: 42,
+      // Igual para todas: 1/n por acción (sin el tope de 25 %, para que con pocas acciones también sea igual).
+      pfCapital: capital, pfMinWeight: equal ? 0 : 2, pfMaxWeight: equal ? 100 : 25, pfMaxPos: 10, pfRiskFree: 3,
+      pfCorFilter: true, pfCorThresh: 0.85, pfMode: equal ? 'equalweight' : 'maxsharpe', pfSims: 10000, pfSeed: 42,
       pfStopType: 'none', pfStopATRMult: 2, pfStopATRPeriod: 14, pfStopPctVal: 8,
       sectorData: {}, scanDirection: 'long', pfUniverseSource: 'scan', pfManualTickers: '',
       fetchSectors, dataCacheRef: cacheRef, setPfBuilding: () => {}, setTab: () => {},

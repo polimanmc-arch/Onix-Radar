@@ -148,3 +148,16 @@ test('weekly prices: compact parallel batches and no ticker is downloaded twice 
   assert.ok(cacheRef.current.T0['1wk'].ok&&cacheRef.current.EXTRA['1wk'].ok);
   assert.deepEqual(seen[seen.length-1],[451,451],'progress reaches the total');
 });
+
+test('equal weighting: same money per stock in the portfolio and in the backtest',()=>{
+  const ctx=vm.createContext({window:{},console});
+  vm.runInContext(fs.readFileSync(path.join(root,'public/app/core/simpleSimulator.js'),'utf8'),ctx);
+  const c=ctx.window.StockScannerCore;
+  const strategy=c.SIMPLE_STRATEGIES[0], market={id:'DOW30',preset:'DOW30',benchmark:'DIA'};
+  const eq=c.buildSimplePortfolioOptions({strategy,candidates:[{ticker:'A'},{ticker:'B'}],cacheRef:{current:{}},fetchSectors:async()=>({}),weighting:'equal'});
+  assert.equal(eq.pfMode,'equalweight'); assert.equal(eq.pfMaxWeight,100,'no 25 % cap, so 2 stocks get 50 % each');
+  const mk=c.buildSimplePortfolioOptions({strategy,candidates:[{ticker:'A'}],cacheRef:{current:{}},fetchSectors:async()=>({})});
+  assert.equal(mk.pfMode,'maxsharpe'); assert.equal(mk.pfMaxWeight,25);
+  assert.equal(c.buildSimpleBacktestOptions({market,strategy,period:{weeks:52},weighting:'equal'}).btAllocationMode,'equal');
+  assert.equal(c.buildSimpleBacktestOptions({market,strategy,period:{weeks:52}}).btAllocationMode,'maxsharpe');
+});
