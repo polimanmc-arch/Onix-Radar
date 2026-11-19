@@ -100,6 +100,8 @@ window.StockScannerUI = window.StockScannerUI || {};
   });
 
   // Gráfico de velas semanales del valor seleccionado en el escáner (mismo motor que el inspector experto).
+  // Colores de los osciladores (distintos del amarillo de la media móvil).
+  const OSC_COLORS = ['#4cc9f0', '#f472b6', '#a3e635'];
   const SimpleCandles = memo(function SimpleCandles({ ticker, data, strategy, row, currency }){
     const host = useRef(null);
     const oscRefs = useRef([]);
@@ -117,13 +119,14 @@ window.StockScannerUI = window.StockScannerUI || {};
           activeFilters: strategy.entry, activeEntryRules: [], activeExitRules: [], chartTf: '1wk', backtestTrades: [],
           showExitInfo: false, showVolume: true, showIndicators: true, setCrossInfo: () => {}, priceHeight: host.current.clientHeight || 300,
         });
-        // Un panel por oscilador, con el nivel de compra y el de venta de la estrategia.
-        oscFilters.forEach((f, i) => {
-          const el = oscRefs.current[i]; if(!el) return;
-          const exits = (strategy.exit || []).flat().filter(x => x.ind === f.ind && x.cmpType === 'val');
-          const oc = renderer.buildOscChart(el, chart, data, times, '1wk', { activeFilters: [f], activeExitRules: [{ conditions: exits }], showExitInfo: true, oscHeight: el.clientHeight || 110 });
+        // Un solo panel con todos los osciladores (líneas finas), con el nivel de compra de cada uno y los de venta.
+        const el = oscRefs.current[0];
+        if(el && oscFilters.length){
+          const exits = (strategy.exit || []).flat().filter(x => oscFilters.some(f => f.ind === x.ind && f.params.p === x.params.p) && x.cmpType === 'val');
+          const oc = renderer.buildOscChart(el, chart, data, times, '1wk', { activeFilters: oscFilters, activeExitRules: [{ conditions: exits }], showExitInfo: true,
+            oscHeight: el.clientHeight || 130, lineWidth: 1, lineColors: OSC_COLORS });
           if(oc) oscCharts.push(oc);
-        });
+        }
         // Misma anchura de escala en todos los paneles para que las fechas queden alineadas; sólo el último muestra el eje de fechas.
         [chart, ...oscCharts].forEach((ch, i, arr) => ch.applyOptions({ rightPriceScale: { minimumWidth: 78 }, timeScale: { visible: i === arr.length - 1 } }));
         if(times.length > 104) chart.timeScale().setVisibleLogicalRange({ from: times.length - 104, to: times.length + 2 });
@@ -147,12 +150,10 @@ window.StockScannerUI = window.StockScannerUI || {};
           <small>{`Velas semanales · últimos 2 años${lines.length ? ' · ' + [...new Set(lines)].join(', ') : ''}`}</small>
         </figcaption>
         <div ref={host} className="simple-candles-chart" role="img" aria-label={`Gráfico de velas semanales de ${ticker}`}/>
-        {oscFilters.map((f, i) => (
-          <div key={f.ind + f.params.p} className="simple-osc">
-            <span className="simple-osc-label">{f.ind === 'RSI' ? `RSI ${f.params.p}` : `Estocástico %K ${f.params.p}`}</span>
-            <div ref={el => { oscRefs.current[i] = el; }} className="simple-osc-chart" role="img" aria-label={`${f.ind === 'RSI' ? 'RSI' : 'Estocástico'} de ${ticker}`}/>
-          </div>
-        ))}
+        {oscFilters.length > 0 && <div className="simple-osc">
+          <span className="simple-osc-label">{oscFilters.map((f, i) => <span key={f.ind + f.params.p}><i style={{ background: OSC_COLORS[i % OSC_COLORS.length] }}/>{f.ind === 'RSI' ? `RSI ${f.params.p}` : `Estocástico %K ${f.params.p}`}</span>)}</span>
+          <div ref={el => { oscRefs.current[0] = el; }} className="simple-osc-chart" role="img" aria-label={`${oscFilters.map(f => f.ind === 'RSI' ? 'RSI' : 'Estocástico').join(' y ')} de ${ticker}`}/>
+        </div>}
         {!ok && <p className="simple-note">No hay gráfico disponible para este valor.</p>}
       </figure>
     );

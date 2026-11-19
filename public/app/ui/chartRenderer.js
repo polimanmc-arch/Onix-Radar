@@ -289,7 +289,7 @@
   }
 
   // ─── OSCILLATOR CHART ───────────────────────────────────────────────────────
-  function buildOscChart(container, priceChart, d, times, chartTf, { activeFilters, activeExitRules, showExitInfo, oscHeight=180 }){
+  function buildOscChart(container, priceChart, d, times, chartTf, { activeFilters, activeExitRules, showExitInfo, oscHeight=180, lineWidth=2, lineColors=null }){
     const tfFilters=(activeFilters||[]).filter(f=>f.tf===chartTf);
     const oscFilters=tfFilters.filter(f=>['RSI','STOCH','MACD','ATR'].includes(f.ind));
     if(!oscFilters.length||!container) return null;
@@ -320,10 +320,10 @@
       if(!series.length) return;
       const offset=times.length-series.length;
       const lineData=series.map((v,i)=>({time:times[i+offset],value:v})).filter(p=>p.time);
-      const color=colors.osc[fi%colors.osc.length];
-      oscChart.addLineSeries({color,lineWidth:2,title:f.ind+'('+f.params.p+')'}).setData(lineData);
+      const color=lineColors?.[fi%lineColors.length]||colors.osc[fi%colors.osc.length];
+      oscChart.addLineSeries({color,lineWidth,title:f.ind+'('+f.params.p+')'}).setData(lineData);
       if(f.cmpType==='val'&&lineData.length>1)
-        oscChart.addLineSeries({color:colors.levelLine,lineWidth:1,lineStyle:2,title:'Nivel '+f.cmpVal,crosshairMarkerVisible:false}).setData(lineData.map(p=>({time:p.time,value:f.cmpVal})));
+        oscChart.addLineSeries({color:lineColors?color:colors.levelLine,lineWidth:1,lineStyle:2,title:'Nivel '+f.cmpVal,crosshairMarkerVisible:false}).setData(lineData.map(p=>({time:p.time,value:f.cmpVal})));
     });
 
     // Exit rule level lines
