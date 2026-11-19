@@ -41,7 +41,7 @@ function buildFilterFromIndicator(indicators, nid){
     cmpVal: def?.metaType==='text' ? '' : 0,
     cmpInd: 'SMA',
     cmpParams: { p:20 },
-    ignoreMissing: !!def?.supportsIgnoreMissing,
+    ignoreMissing: false,
   };
 }
 
@@ -356,7 +356,7 @@ function FilterRow(f, idx, side, ctx){
       op:text?(f.op==='<'?'<':'>'):op,
       cmpType:(meta||text)?'val':f.cmpType,
       cmpVal:text?'':(meta?(typeof f.cmpVal==='number'?f.cmpVal:0):(f.cmpVal||0)),
-      ignoreMissing:!!def?.supportsIgnoreMissing},side);
+      ignoreMissing:false},side);
   };
 
   return (
@@ -549,6 +549,7 @@ function ResultsHeader(ctx, shownCount, totalCount){
 
 function ResultsTable(ctx, selectedTicker, onSelect){
   const {S,tfColor,filters,shortFilters,scanDirection,shown,visRows,setVisRows,setSelectedChart,fmt,sortK,sortD,doSort,indLbl,scanning,onlyPass} = ctx;
+  const INDICATORS = ctx.INDICATORS || [];
   const activeFilters = scanDirection === 'short' ? shortFilters : filters;
   // Columns: TICKER, PRECIO, [one per filter], CHART
   const totalCols = 3 + activeFilters.length;
@@ -571,11 +572,11 @@ function ResultsTable(ctx, selectedTicker, onSelect){
               <th key={f._id} onClick={()=>doSort("f"+i)}
                 style={{...thBase,textAlign:"center",cursor:"pointer",borderLeft:"1px solid var(--panel-soft-border)",color:sortK==="f"+i?"var(--accent)":(tfColor[f.tf]||"var(--text-2)")}}>
                 <div style={{fontSize:10,fontWeight:700,letterSpacing:.3,textTransform:"none"}}>
-                  {indLbl(f.ind,f.params)}
+                  {INDICATORS.find(x=>x.id===f.ind)?.meta?f.ind:indLbl(f.ind,f.params)}
                   {sortK==="f"+i?(sortD>0?" asc":" desc"):""}
                 </div>
                 <div style={{fontSize:8,color:"var(--text-2)",marginTop:2,textTransform:"none",fontWeight:400,letterSpacing:0}}>
-                  [{f.tf}] {formatRule(f,indLbl)}
+                  [{INDICATORS.find(x=>x.id===f.ind)?.meta?'dato actual':f.tf}] {formatRule(f,indLbl)}{f.ignoreMissing?' · ignora faltantes':''}
                 </div>
               </th>
             ))}

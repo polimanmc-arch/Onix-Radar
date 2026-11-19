@@ -46,8 +46,16 @@
         ? def.label
         : id;
   }
+  // Fundamentales y perfil: dato actual, sin periodo ni temporalidad.
+  function isMetaFilter(f) {
+    return !!(window.StockScannerConfig?.INDICATORS || []).find((x) => x.id === f?.ind)?.meta;
+  }
+  function tfTag(f) {
+    return isMetaFilter(f) ? "dato actual" : f.tf;
+  }
   // Short pill label - no parentheses, cleaner for the header chips.
   function pillLabel(f) {
+    if (isMetaFilter(f)) return f.ind;
     if (f.ind === "STOCH") return "STOCH " + f.params.p;
     if (f.ind === "MACD")
       return "MACD " + f.params.p + "/" + (f.params.sl || 26);
@@ -88,6 +96,13 @@
   // timeframes we rely on the scan cache (already populated when the scanner
   // ran this ticker). Returns { value, pass } or nulls.
   function computeFilterStatus(f, dataCache, ticker, chartData, chartTf) {
+    if (isMetaFilter(f)) {
+      // Se evalúa con los fundamentales descargados por el escaneo.
+      const meta = dataCache.current?.[ticker]?._meta;
+      if (!meta) return { value: null, pass: null };
+      const r = window.StockScannerCore.testFilter(f, { ok: true, closes: [], _meta: meta });
+      return { value: r.val, pass: r.val == null ? null : r.pass };
+    }
     let tfData = null;
     if (f.tf === chartTf && chartData?.ok) tfData = chartData;
     else tfData = dataCache.current?.[ticker]?.[f.tf];
@@ -1056,7 +1071,7 @@
                         fontSize: 9,
                       }}
                     >
-                      [{f.tf}]
+                      [{tfTag(f)}]
                     </span>
                   </button>
                 );
@@ -1368,7 +1383,7 @@
                           fontFamily: "var(--font-mono)",
                         }}
                       >
-                        [{f.tf}]
+                        [{tfTag(f)}]
                       </span>
                     </div>
                     <div
@@ -1544,12 +1559,12 @@
   }
 
   const InspectorSummary = React.memo(function InspectorSummary({ticker,data,dataCache,filters,crossInfo,signalTimes}){
-    const statuses=React.useMemo(()=>filters.filter(f=>f.tf===data?.tf).map(f=>{
+    const statuses=React.useMemo(()=>filters.filter(f=>f.tf===data?.tf||isMetaFilter(f)).map(f=>{
       const key=f._id ?? [f.tf,f.ind,f.op,f.cmpType,f.params?.p,f.params?.ks,f.params?.dp,f.params?.sl,f.params?.sg,f.cmpInd,f.cmpParams?.p,f.cmpParams?.ks,f.cmpParams?.dp,f.cmpParams?.sl,f.cmpParams?.sg,f.cmpVal].join('|');
       const signalTime=signalTimes?.[f.tf];
       const index=signalTime==null?1:data.times?.indexOf(signalTime);
       const closedData=window.StockScannerCore.buildSignalSliceFromIndex(data,index>=0?index:1);
-      const latest=closedData.ok?computeFilterStatus(f,dataCache,ticker,closedData,data.tf):{value:null,pass:null};
+      const latest=isMetaFilter(f)?computeFilterStatus(f,dataCache,ticker,null,data?.tf):closedData.ok?computeFilterStatus(f,dataCache,ticker,closedData,data.tf):{value:null,pass:null};
       return {f,...(crossInfo?.filterValues?.[key] || latest)};
     }),[filters,data,ticker,dataCache,crossInfo,signalTimes]);
     if(!statuses.length)return null;
@@ -1557,9 +1572,9 @@
       {crossInfo?.date&&<div className="inspector-cursor-date">Cursor: {crossInfo.date.toLocaleDateString('es',{day:'2-digit',month:'short',year:'2-digit'})}</div>}
       {!crossInfo&&<div className="inspector-cursor-date">Última vela cerrada</div>}
       <div className="inspector-indicator-cards">{statuses.map(({f,value,pass},i)=><div key={f._id??i} className="inspector-indicator-card" data-pass={pass==null?'unknown':pass?'yes':'no'}>
-        <span>{pillLabel(f)} <small>[{f.tf}]</small></span>
+        <span>{pillLabel(f)} <small>[{tfTag(f)}]</small></span>
         <strong>{typeof value==='number'?fmtNum(value,2):value??'?'}</strong>
-        <small style={{color:pass==null?'var(--text-2)':pass?'var(--green)':'var(--red)'}}>{formatRule(f)} ? {pass==null?'Sin dato':pass?'Pasa':'No pasa'}</small>
+        <small style={{color:pass==null?'var(--text-2)':pass?'var(--green)':'var(--red)'}}>{formatRule(f)} · {pass==null?'Sin dato':pass?'Pasa':'No pasa'}</small>
       </div>)}</div>
     </div>;
   });

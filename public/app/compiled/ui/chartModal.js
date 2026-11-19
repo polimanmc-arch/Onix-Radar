@@ -45,9 +45,19 @@
                 ? def.label
                 : id;
     }
+    // Fundamentales y perfil: dato actual, sin periodo ni temporalidad.
+    function isMetaFilter(f) {
+        var _a, _b;
+        return !!((_b = (((_a = window.StockScannerConfig) === null || _a === void 0 ? void 0 : _a.INDICATORS) || []).find((x) => x.id === (f === null || f === void 0 ? void 0 : f.ind))) === null || _b === void 0 ? void 0 : _b.meta);
+    }
+    function tfTag(f) {
+        return isMetaFilter(f) ? "dato actual" : f.tf;
+    }
     // Short pill label - no parentheses, cleaner for the header chips.
     function pillLabel(f) {
         var _a;
+        if (isMetaFilter(f))
+            return f.ind;
         if (f.ind === "STOCH")
             return "STOCH " + f.params.p;
         if (f.ind === "MACD")
@@ -90,12 +100,20 @@
     // timeframes we rely on the scan cache (already populated when the scanner
     // ran this ticker). Returns { value, pass } or nulls.
     function computeFilterStatus(f, dataCache, ticker, chartData, chartTf) {
-        var _a, _b, _c;
+        var _a, _b, _c, _d, _e;
+        if (isMetaFilter(f)) {
+            // Se evalúa con los fundamentales descargados por el escaneo.
+            const meta = (_b = (_a = dataCache.current) === null || _a === void 0 ? void 0 : _a[ticker]) === null || _b === void 0 ? void 0 : _b._meta;
+            if (!meta)
+                return { value: null, pass: null };
+            const r = window.StockScannerCore.testFilter(f, { ok: true, closes: [], _meta: meta });
+            return { value: r.val, pass: r.val == null ? null : r.pass };
+        }
         let tfData = null;
         if (f.tf === chartTf && (chartData === null || chartData === void 0 ? void 0 : chartData.ok))
             tfData = chartData;
         else
-            tfData = (_b = (_a = dataCache.current) === null || _a === void 0 ? void 0 : _a[ticker]) === null || _b === void 0 ? void 0 : _b[f.tf];
+            tfData = (_d = (_c = dataCache.current) === null || _c === void 0 ? void 0 : _c[ticker]) === null || _d === void 0 ? void 0 : _d[f.tf];
         if (!tfData || !tfData.ok)
             return { value: null, pass: null };
         const res = evalInd(f.ind, f.params, tfData);
@@ -106,7 +124,7 @@
             cmp = f.cmpVal;
         else if (f.cmpType === "prev") {
             const arr = Array.isArray(res) ? res : [];
-            cmp = (_c = arr[1]) !== null && _c !== void 0 ? _c : null;
+            cmp = (_e = arr[1]) !== null && _e !== void 0 ? _e : null;
         }
         else if (f.cmpType === "ind") {
             const r2 = evalInd(f.cmpInd, f.cmpParams, tfData);
@@ -849,7 +867,7 @@
                                 fontSize: 9,
                             } },
                             "[",
-                            f.tf,
+                            tfTag(f),
                             "]")));
                 })))),
             React.createElement("div", { className: "chart-container", style: { position: "relative" } },
@@ -1036,7 +1054,7 @@
                                     fontFamily: "var(--font-mono)",
                                 } },
                                 "[",
-                                f.tf,
+                                tfTag(f),
                                 "]")),
                         React.createElement("div", { style: {
                                 display: "flex",
@@ -1156,13 +1174,13 @@
                         ] }))))));
     }
     const InspectorSummary = React.memo(function InspectorSummary({ ticker, data, dataCache, filters, crossInfo, signalTimes }) {
-        const statuses = React.useMemo(() => filters.filter(f => f.tf === (data === null || data === void 0 ? void 0 : data.tf)).map(f => {
+        const statuses = React.useMemo(() => filters.filter(f => f.tf === (data === null || data === void 0 ? void 0 : data.tf) || isMetaFilter(f)).map(f => {
             var _a, _b, _c, _d, _e, _f, _g, _h, _j, _k, _l, _m, _o;
             const key = (_a = f._id) !== null && _a !== void 0 ? _a : [f.tf, f.ind, f.op, f.cmpType, (_b = f.params) === null || _b === void 0 ? void 0 : _b.p, (_c = f.params) === null || _c === void 0 ? void 0 : _c.ks, (_d = f.params) === null || _d === void 0 ? void 0 : _d.dp, (_e = f.params) === null || _e === void 0 ? void 0 : _e.sl, (_f = f.params) === null || _f === void 0 ? void 0 : _f.sg, f.cmpInd, (_g = f.cmpParams) === null || _g === void 0 ? void 0 : _g.p, (_h = f.cmpParams) === null || _h === void 0 ? void 0 : _h.ks, (_j = f.cmpParams) === null || _j === void 0 ? void 0 : _j.dp, (_k = f.cmpParams) === null || _k === void 0 ? void 0 : _k.sl, (_l = f.cmpParams) === null || _l === void 0 ? void 0 : _l.sg, f.cmpVal].join('|');
             const signalTime = signalTimes === null || signalTimes === void 0 ? void 0 : signalTimes[f.tf];
             const index = signalTime == null ? 1 : (_m = data.times) === null || _m === void 0 ? void 0 : _m.indexOf(signalTime);
             const closedData = window.StockScannerCore.buildSignalSliceFromIndex(data, index >= 0 ? index : 1);
-            const latest = closedData.ok ? computeFilterStatus(f, dataCache, ticker, closedData, data.tf) : { value: null, pass: null };
+            const latest = isMetaFilter(f) ? computeFilterStatus(f, dataCache, ticker, null, data === null || data === void 0 ? void 0 : data.tf) : closedData.ok ? computeFilterStatus(f, dataCache, ticker, closedData, data.tf) : { value: null, pass: null };
             return { f, ...(((_o = crossInfo === null || crossInfo === void 0 ? void 0 : crossInfo.filterValues) === null || _o === void 0 ? void 0 : _o[key]) || latest) };
         }), [filters, data, ticker, dataCache, crossInfo, signalTimes]);
         if (!statuses.length)
@@ -1180,12 +1198,12 @@
                         " ",
                         React.createElement("small", null,
                             "[",
-                            f.tf,
+                            tfTag(f),
                             "]")),
                     React.createElement("strong", null, typeof value === 'number' ? fmtNum(value, 2) : value !== null && value !== void 0 ? value : '?'),
                     React.createElement("small", { style: { color: pass == null ? 'var(--text-2)' : pass ? 'var(--green)' : 'var(--red)' } },
                         formatRule(f),
-                        " ? ",
+                        " \u00B7 ",
                         pass == null ? 'Sin dato' : pass ? 'Pasa' : 'No pasa'));
             })));
     });

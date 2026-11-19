@@ -39,7 +39,7 @@ window.StockScannerTabs = window.StockScannerTabs || {};
             cmpVal: (def === null || def === void 0 ? void 0 : def.metaType) === 'text' ? '' : 0,
             cmpInd: 'SMA',
             cmpParams: { p: 20 },
-            ignoreMissing: !!(def === null || def === void 0 ? void 0 : def.supportsIgnoreMissing),
+            ignoreMissing: false,
         };
     }
     // ── Helpers ────────────────────────────────────────────────────────────────
@@ -343,7 +343,7 @@ window.StockScannerTabs = window.StockScannerTabs || {};
                 op: text ? (f.op === '<' ? '<' : '>') : op,
                 cmpType: (meta || text) ? 'val' : f.cmpType,
                 cmpVal: text ? '' : (meta ? (typeof f.cmpVal === 'number' ? f.cmpVal : 0) : (f.cmpVal || 0)),
-                ignoreMissing: !!(def === null || def === void 0 ? void 0 : def.supportsIgnoreMissing) }, side);
+                ignoreMissing: false }, side);
         };
         return (React.createElement("div", { key: f._id, style: { display: "flex", flexWrap: "wrap", gap: 5, alignItems: "center", padding: "8px 10px", background: "var(--panel-soft-bg)", border: "1px solid var(--panel-soft-border)", borderRadius: 5, marginBottom: 6 } },
             React.createElement("span", { style: { color: "var(--text-3)", fontSize: 8, fontWeight: 700, minWidth: 16 } },
@@ -519,6 +519,7 @@ window.StockScannerTabs = window.StockScannerTabs || {};
     }
     function ResultsTable(ctx, selectedTicker, onSelect) {
         const { S, tfColor, filters, shortFilters, scanDirection, shown, visRows, setVisRows, setSelectedChart, fmt, sortK, sortD, doSort, indLbl, scanning, onlyPass } = ctx;
+        const INDICATORS = ctx.INDICATORS || [];
         const activeFilters = scanDirection === 'short' ? shortFilters : filters;
         // Columns: TICKER, PRECIO, [one per filter], CHART
         const totalCols = 3 + activeFilters.length;
@@ -534,15 +535,19 @@ window.StockScannerTabs = window.StockScannerTabs || {};
                         React.createElement("th", { onClick: () => doSort("price"), style: { ...thBase, textAlign: "right", cursor: "pointer", color: sortK === "price" ? "var(--accent)" : "var(--text-2)" } },
                             "Precio ",
                             sortK === "price" ? (sortD > 0 ? "asc" : "desc") : ""),
-                        activeFilters.map((f, i) => (React.createElement("th", { key: f._id, onClick: () => doSort("f" + i), style: { ...thBase, textAlign: "center", cursor: "pointer", borderLeft: "1px solid var(--panel-soft-border)", color: sortK === "f" + i ? "var(--accent)" : (tfColor[f.tf] || "var(--text-2)") } },
-                            React.createElement("div", { style: { fontSize: 10, fontWeight: 700, letterSpacing: .3, textTransform: "none" } },
-                                indLbl(f.ind, f.params),
-                                sortK === "f" + i ? (sortD > 0 ? " asc" : " desc") : ""),
-                            React.createElement("div", { style: { fontSize: 8, color: "var(--text-2)", marginTop: 2, textTransform: "none", fontWeight: 400, letterSpacing: 0 } },
-                                "[",
-                                f.tf,
-                                "] ",
-                                formatRule(f, indLbl))))),
+                        activeFilters.map((f, i) => {
+                            var _a, _b;
+                            return (React.createElement("th", { key: f._id, onClick: () => doSort("f" + i), style: { ...thBase, textAlign: "center", cursor: "pointer", borderLeft: "1px solid var(--panel-soft-border)", color: sortK === "f" + i ? "var(--accent)" : (tfColor[f.tf] || "var(--text-2)") } },
+                                React.createElement("div", { style: { fontSize: 10, fontWeight: 700, letterSpacing: .3, textTransform: "none" } },
+                                    ((_a = INDICATORS.find(x => x.id === f.ind)) === null || _a === void 0 ? void 0 : _a.meta) ? f.ind : indLbl(f.ind, f.params),
+                                    sortK === "f" + i ? (sortD > 0 ? " asc" : " desc") : ""),
+                                React.createElement("div", { style: { fontSize: 8, color: "var(--text-2)", marginTop: 2, textTransform: "none", fontWeight: 400, letterSpacing: 0 } },
+                                    "[",
+                                    ((_b = INDICATORS.find(x => x.id === f.ind)) === null || _b === void 0 ? void 0 : _b.meta) ? 'dato actual' : f.tf,
+                                    "] ",
+                                    formatRule(f, indLbl),
+                                    f.ignoreMissing ? ' · ignora faltantes' : '')));
+                        }),
                         React.createElement("th", { style: { ...thBase, textAlign: "center", borderLeft: "1px solid var(--panel-soft-border)", color: "var(--text-2)" } }, "Grafico"))),
                 React.createElement("tbody", null,
                     shown.length === 0 && (React.createElement("tr", null,

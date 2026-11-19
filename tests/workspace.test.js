@@ -360,3 +360,27 @@ test('fundamental filters can be chosen in the scanner and are not offered in ba
   assert.ok(btOptions.includes('RSI')&&!btOptions.includes('PE'),'backtest rules exclude fundamentals');
   await Renderer.act(async()=>tree.unmount());
 });
+
+test('fundamental filters show "dato actual", use scan fundamentals in the inspector and do not ignore missing data by default',async()=>{
+  const {tree,window}=await mountApp();
+  const app=tree.root.find(n=>n.type?.name==='ScannerTab').props.ctx;
+  const pe={_id:'pe1',ind:'PE',tf:'1wk',op:'<',cmpType:'val',cmpVal:20,params:{p:14},cmpInd:'SMA',cmpParams:{p:20}};
+  await Renderer.act(async()=>window.scannerState.setFilters([pe]));
+  const closes=[105,103,104];
+  app.dataCacheRef.current.UNH={'1wk':{ok:true,times:[300,200,100],closes,opens:closes,highs:closes,lows:closes,volumes:[1,1,1]},_meta:{peRatio:19.97}};
+  await Renderer.act(async()=>window.scannerState.setResults([{ticker:'UNH',name:'UNH',passed:true,price:389.68,chg:1,fRes:[{pass:true,val:19.97,cmp:20}],shortFRes:[],spark:[],mainTf:'1wk'}]));
+  const json=JSON.stringify(tree.toJSON());
+  assert.ok(json.includes('dato actual'),'results header and inspector use "dato actual" instead of a timeframe');
+  assert.ok(!json.includes('PE 14'),'no meaningless period');
+  const card=tree.root.findAll(n=>n.props?.className==='inspector-indicator-card');
+  assert.equal(card.length,1);
+  assert.equal(card[0].props['data-pass'],'yes');
+  assert.equal(card[0].findByType('strong').children.join(''),'19.97');
+  // Elegir un fundamental en el editor deja "Ignorar faltantes" desactivado.
+  await Renderer.act(async()=>tree.root.find(n=>n.type==='button'&&n.children.join('')==='Universo y filtros').props.onClick());
+  const select=tree.root.findAll(n=>n.type==='select'&&n.props.value==='PE')[0];
+  await Renderer.act(async()=>select.props.onChange({target:{value:'ROE'}}));
+  assert.equal(window.scannerState.filters[0].ind,'ROE');
+  assert.equal(window.scannerState.filters[0].ignoreMissing,false);
+  await Renderer.act(async()=>tree.unmount());
+});
