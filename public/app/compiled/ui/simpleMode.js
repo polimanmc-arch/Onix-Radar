@@ -95,6 +95,9 @@ window.StockScannerUI = window.StockScannerUI || {};
             React.createElement("button", { type: "button", "aria-label": "M\u00E1s a\u00F1os", onClick: () => onChange(clamp(value + 1)), disabled: value >= max }, "+"),
             React.createElement("small", null, value > 3 ? 'descarga 10 años de precios' : `máx. ${max}`));
     }
+    // Contacto del autor (vacío = sin botón).
+    const AUTHOR_LINKEDIN = '';
+    const AUTHOR_EMAIL = '';
     function Stars({ n, size = 26 }) {
         return React.createElement("span", { className: "simple-stars", "aria-label": `${n} de 3 estrellas`, style: { fontSize: size } }, [0, 1, 2].map(i => React.createElement("span", { key: i, "aria-hidden": "true", className: i < n ? 'on' : 'off' }, "\u2605")));
     }
@@ -870,7 +873,19 @@ window.StockScannerUI = window.StockScannerUI || {};
                             ? React.createElement("button", { type: "button", className: "simple-view", onClick: () => openGame(g), disabled: running, "aria-label": `Ver la partida ${g.strategy} en ${g.market}` }, "Ver \u25B8")
                             : React.createElement("span", { className: "simple-view-na", title: "Partida anterior a esta opci\u00F3n: no se guardaron los detalles" }, "\u2014"))))))),
                 rankMsg && React.createElement("p", { className: "simple-note", role: "status" }, rankMsg)),
-            React.createElement("p", { className: "simple-disclaimer" }, "Radar Onix \u00B7 creado por Diego Santos. Datos reales de Yahoo Finance. Rentabilidades pasadas no garantizan resultados futuros; es una herramienta educativa, no una recomendaci\u00F3n de inversi\u00F3n.")));
+            React.createElement("div", { className: "simple-credit" },
+                React.createElement("span", null,
+                    "Radar Onix \u00B7 creado por ",
+                    React.createElement("b", null, "Diego Santos")),
+                AUTHOR_LINKEDIN && React.createElement("a", { href: AUTHOR_LINKEDIN, target: "_blank", rel: "noopener noreferrer", className: "simple-linkedin", "aria-label": "Perfil de LinkedIn de Diego Santos" },
+                    React.createElement("svg", { viewBox: "0 0 24 24", "aria-hidden": "true", width: "18", height: "18" },
+                        React.createElement("path", { fill: "currentColor", d: "M20.45 20.45h-3.56v-5.57c0-1.33-.03-3.04-1.85-3.04-1.85 0-2.14 1.45-2.14 2.94v5.67H9.34V9h3.42v1.56h.05c.48-.9 1.64-1.85 3.37-1.85 3.6 0 4.27 2.37 4.27 5.46v6.28zM5.34 7.43a2.06 2.06 0 1 1 0-4.13 2.06 2.06 0 0 1 0 4.13zM7.12 20.45H3.56V9h3.56v11.45zM22.22 0H1.77C.79 0 0 .77 0 1.73v20.54C0 23.23.79 24 1.77 24h20.45c.98 0 1.78-.77 1.78-1.73V1.73C24 .77 23.2 0 22.22 0z" })),
+                    "LinkedIn"),
+                AUTHOR_EMAIL && React.createElement("a", { href: `mailto:${AUTHOR_EMAIL}`, className: "simple-mail", "aria-label": `Escribir a Diego Santos: ${AUTHOR_EMAIL}` },
+                    React.createElement("svg", { viewBox: "0 0 24 24", "aria-hidden": "true", width: "17", height: "17" },
+                        React.createElement("path", { fill: "none", stroke: "currentColor", strokeWidth: "2", d: "M3 5h18v14H3zM3 6l9 7 9-7" })),
+                    AUTHOR_EMAIL)),
+            React.createElement("p", { className: "simple-disclaimer" }, "Datos reales de Yahoo Finance. Rentabilidades pasadas no garantizan resultados futuros; es una herramienta educativa, no una recomendaci\u00F3n de inversi\u00F3n.")));
     }
     window.StockScannerUI.SimpleMode = SimpleMode;
 })();
