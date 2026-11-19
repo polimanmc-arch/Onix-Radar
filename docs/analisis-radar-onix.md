@@ -37,6 +37,10 @@ La lista "S&P 500" del scanner (`config/universes.js`) sale ahora de los miembro
 
 Mejora añadida: alertas por Telegram (`public/app/core/alerts.js`, `scripts/run-alerts.js`, `.github/workflows/telegram-alerts.yml`, ruta `/api/telegram/*`). GitHub Actions ejecuta las alertas de `alerts/alerts.json` de lunes a viernes a las 21:30 UTC y envía sólo las señales nuevas (vela cerrada dentro de la ventana de 26 h y que no pasaba en la vela anterior, sin guardar estado). En el scanner hay un botón de envío manual (texto generado en el servidor, con límite de frecuencia) y la exportación de los filtros actuales como alerta. Configuración en el README. Corrección asociada: la clave de fecha del portafolio desplazaba al día siguiente las velas diarias de EE. UU. (13:30 UTC + 12 h); ahora usa +6 h.
 
+Backtest con historial parcial: los valores con al menos 30 velas semanales participan desde que tienen datos (salidas a bolsa o altas recientes) en lugar de descartarse por no cubrir todo el periodo. El calendario semanal sale de la serie válida más larga. Datos y diagnóstico indica cuántos valores tienen historial parcial.
+
+Indicadores verificados contra implementaciones de referencia independientes (`tests/indicatorReference.test.js`). La instalación de `trading-signals` como dependencia de desarrollo quedó pendiente de autorización.
+
 ## Alcance y comprobaciones
 
 Se revisaron la estructura, las entradas de la aplicación, los flujos de scanner/backtest/portafolio, la configuración de temporalidades, persistencia, servicios y cachés, rutas, compilación, pruebas e identidad visual. No es una certificación financiera ni una auditoría exhaustiva de cada interacción.

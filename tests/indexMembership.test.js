@@ -107,3 +107,25 @@ test('scanner S&P 500 list is the current composition from the history file',()=
   for(const t of ['ANSS','PXD','DFS','BK']) assert.ok(!cfg.SP500.includes(t),t);
   assert.ok(cfg.US_INDEX_COMPONENTS.includes('PLTR'),'derived universes use the new list');
 });
+
+test('stocks listed during the backtest take part from their first weeks of data instead of being dropped',async()=>{
+  const w=load(['core/ruleEvaluator.js','core/backtestWorkflow.js']);
+  const core=w.StockScannerCore;
+  core.fetchTicker=async(t,tf)=>({ticker:t,tf,ok:false});
+  const now=1800000000;
+  const mk=len=>{ const times=Array.from({length:len},(_,i)=>now-i*7*86400); const closes=times.map((_,i)=>100+i*0.1); return {ok:true,closes,opens:closes,highs:closes,lows:closes,volumes:closes.map(()=>1),times}; };
+  const cache={A:{'1wk':mk(220)},B:{'1wk':mk(220)},IPO:{'1wk':mk(40)},TINY:{'1wk':mk(12)}};
+  let r;
+  await core.runBacktestWorkflow({entryRules:[{conditions:[{ind:'PRICE',tf:'1wk',op:'>',cmpType:'val',cmpVal:0,params:{}}]}],exitRules:[],shortEntryRules:[],shortExitRules:[],
+    btDirection:'long',stopATR:false,stopPct:false,btWeeks:100,btCapital:1e5,pfMaxPos:4,pfRiskFree:0,btBenchmark:'ZZ',btCommission:0,btSlippage:0,pfStopATRPeriod:14,
+    pfMinWeight:1,pfMaxWeight:25,btAllocationMode:'equal',btUniverseSource:'scan',mktFilterRules:[],savedStrategiesLength:0,dataCacheRef:{current:cache},
+    setBtRunning:noop,setBtProgress:noop,setTab:noop,setBacktest:x=>{r=x;}});
+  assert.equal(r.diagnostics.validTickers,3,'TINY has fewer than 30 weeks');
+  assert.equal(r.diagnostics.partialHistoryTickers,1);
+  assert.equal(r.equityCurve.length,99,'the timeline comes from the longest series');
+  assert.equal(r.equityCurve[0].holdings,2,'IPO has no data yet at the start');
+  assert.equal(r.equityCurve.at(-1).holdings,3,'IPO is bought once it has data');
+  const ipoStart=cache.IPO['1wk'].times.at(-1);
+  const firstWith3=r.equityCurve.find(p=>p.holdings===3);
+  assert.ok(firstWith3.time>ipoStart,'never before its first candle');
+});

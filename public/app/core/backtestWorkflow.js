@@ -260,6 +260,10 @@
           await Promise.allSettled(missing.map(t=>fetchAndCache(t,tf)));
         }
       };
+      // Mínimo de velas semanales para simular un valor. Los que tienen menos historial que el
+      // periodo (salidas a bolsa recientes, altas en el índice) participan desde que hay datos:
+      // excluirlos por completo sería otro sesgo de selección.
+      const MIN_HISTORY_BARS=30;
       const loadTickerData=async(ticker,tfs)=>{
         throwIfCancelled();
         const entries=await Promise.all(tfs.map(async tf=>[tf,await fetchAndCache(ticker,tf)]));
@@ -272,7 +276,7 @@
         const byTf={};
         entries.forEach(([tf,d])=>{ if(d?.ok) byTf[tf]=d; });
         const mainData=byTf[mainTf];
-        if(mainData&&mainData.closes.length>btWeeks+10){
+        if(mainData&&mainData.closes.length>=MIN_HISTORY_BARS){
           allStockData[ticker]=byTf;
           return {ticker,ok:true};
         }
@@ -457,9 +461,12 @@
       const latestBar=Math.max(0,...allTickers.map(t=>Number(allStockData[t]?.[mainTf]?.times?.[0])||0));
       const validTickers=allTickers.filter(t=>{
         const d=allStockData[t]?.[mainTf];
-        return d?.closes.length>startWeek+10 && (Number(d.times?.[0])||0)>=latestBar-10*86400;
+        return d?.closes.length>=MIN_HISTORY_BARS && (Number(d.times?.[0])||0)>=latestBar-10*86400;
       });
-      const ts0=allStockData[validTickers[0]||allTickers[0]]?.[mainTf]?.times;
+      // Calendario semanal de referencia: la serie válida más larga.
+      const timelineTicker=validTickers.reduce((best,t)=>(allStockData[t][mainTf].closes.length>(allStockData[best]?.[mainTf]?.closes.length||0)?t:best),validTickers[0]||allTickers[0]);
+      const ts0=allStockData[timelineTicker]?.[mainTf]?.times;
+      const fullHistoryTickers=validTickers.filter(t=>allStockData[t][mainTf].closes.length>startWeek+10).length;
       // Pertenencia histórica al índice (universo point-in-time).
       const pitId=(window.StockScannerConfig?.UNIVERSE_PRESETS||{})[btUniverseSource]?.pointInTime||null;
       const membership=pitId?window.StockScannerConfig?.INDEX_MEMBERSHIP?.[pitId]||null:null;
@@ -742,7 +749,7 @@
         const isMemberNow=t=>!membership||memberTime==null||membership.isMember(t,memberTime);
         if(membership&&memberTime!=null){
           const size=membership.size(memberTime);
-          let have=0; for(const t of validTickers) if(membership.isMember(t,memberTime)) have++;
+          let have=0; for(const t of validTickers) if(allStockData[t][mainTf].times?.[signalIndex]!=null&&membership.isMember(t,memberTime)) have++;
           pitStats.weeks++; pitStats.coverageSum+=size?Math.min(1,have/size):0;
           const snap={time:memberTime,size,withData:have};
           if(!pitStats.first) pitStats.first=snap;
@@ -1014,7 +1021,7 @@
       };
       const result={equityCurve,weeklyLog,startVal,endVal,totalReturn,annReturn,annVol,sharpe,maxDrawdown:maxDD2,trades:tradeCount,allTrades:compactTrades,weeks:btWeeks,endOffset,windowStart:ts0?.[startWeek-1]||null,windowEnd:ts0?.[lastSignalIndex-1]||null,capital:btCapital,winRate,avgWin,avgLoss,profitFactor,sortino,calmar,avgDuration,benchCurve,benchReturn,benchSymbol:btBenchmark,riskFreePct:Number(pfRiskFree)||0,totalCommissionPaid,commission:btCommission||0,slippage:btSlippage||0,atrPeriod,allocationMode:btAllocationMode||'equal',timestamp:Date.now(),label:'Estrategia '+(savedStrategiesLength+1),
         status:validTrades.length?'ok':'no_trades',
-        diagnostics:{signalStats,loadStats,tickerIssues:tickerIssues.slice(0,500),validTickers:validTickers.length},
+        diagnostics:{signalStats,loadStats,tickerIssues:tickerIssues.slice(0,500),validTickers:validTickers.length,partialHistoryTickers:validTickers.length-fullHistoryTickers},
         perf:{...perfMarks,totalMs,stages:perfStages,alignedCacheSize:maxWeekAlignedCacheSize,tickers:validTickers.length,loadStats,tickerIssues:tickerIssues.slice(0,500),signalStats,intrabarFetches,validTrades:validTrades.length,invalidTrades:allTrades.length-validTrades.length,lightMemory:backtestLocalOnlyCache,trimmedSeriesCount,trimmedBarsSaved,maxRuleLookback,simulationChunkSize,simulationChunks,simulationYieldCount,fastRuleEvalCount:ruleEvaluator.stats.evalCount,fastRuleFallbackCount:ruleEvaluator.stats.fallbackCount,cacheEntriesBefore,cacheEntriesAfter,cacheTickersReleased,batchChartRequests,batchChartSymbols,batchFetchConcurrency,transientCacheHits,transientCacheWrites,transientCacheReleased,transientCacheRemaining:transientDataCache.size,cooperativeYieldCount,cooperativeLongSliceCount},
         pointInTime:membership?{index:'S&P 500',source:membership.source,lastChange:membership.lastChange,
           avgCoverage:pitStats.weeks?pitStats.coverageSum/pitStats.weeks:null,first:pitStats.first,last:pitStats.last,removalExits:pitStats.removalExits}:null,
