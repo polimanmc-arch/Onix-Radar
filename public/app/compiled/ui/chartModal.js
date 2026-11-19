@@ -1204,7 +1204,7 @@
                     React.createElement("small", { style: { color: pass == null ? 'var(--text-2)' : pass ? 'var(--green)' : 'var(--red)' } },
                         formatRule(f),
                         " \u00B7 ",
-                        pass == null ? 'Sin dato' : pass ? 'Pasa' : 'No pasa'));
+                        pass == null ? (f.ignoreMissing ? 'Sin dato · se ignora' : 'Sin dato') : pass ? 'Pasa' : 'No pasa'));
             })));
     });
     window.StockScannerUI = Object.assign(window.StockScannerUI || {}, {

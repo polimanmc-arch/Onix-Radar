@@ -1574,7 +1574,7 @@
       <div className="inspector-indicator-cards">{statuses.map(({f,value,pass},i)=><div key={f._id??i} className="inspector-indicator-card" data-pass={pass==null?'unknown':pass?'yes':'no'}>
         <span>{pillLabel(f)} <small>[{tfTag(f)}]</small></span>
         <strong>{typeof value==='number'?fmtNum(value,2):value??'?'}</strong>
-        <small style={{color:pass==null?'var(--text-2)':pass?'var(--green)':'var(--red)'}}>{formatRule(f)} · {pass==null?'Sin dato':pass?'Pasa':'No pasa'}</small>
+        <small style={{color:pass==null?'var(--text-2)':pass?'var(--green)':'var(--red)'}}>{formatRule(f)} · {pass==null?(f.ignoreMissing?'Sin dato · se ignora':'Sin dato'):pass?'Pasa':'No pasa'}</small>
       </div>)}</div>
     </div>;
   });
