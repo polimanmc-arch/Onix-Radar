@@ -101,6 +101,15 @@ window.StockScannerUI = window.StockScannerUI || {};
 
   // Gráfico de velas semanales del valor seleccionado en el escáner (mismo motor que el inspector experto).
   // Colores de los osciladores (distintos del amarillo de la media móvil).
+  // Moneda por el sufijo del ticker (universos mixtos como "Todo el mercado"); si no, la del mercado.
+  const SUFFIX_CCY = { CO: 'DKK', ST: 'SEK', OL: 'NOK', HE: '€', DE: '€', F: '€', PA: '€', MI: '€', AS: '€', MC: '€', BR: '€', LS: '€', VI: '€', IR: '€',
+    L: 'p', SW: 'CHF', T: '¥', HK: 'HK$', TO: 'C$', V: 'C$', AX: 'A$', SA: 'R$', MX: 'MX$', KS: '₩', NS: '₹', BO: '₹' };
+  const currencyOf = (ticker, fallback) => {
+    if(/^\^|=/.test(ticker || '')) return fallback === '$' ? '' : fallback; // índices, divisas y futuros: sin símbolo
+    const m = /\.([A-Z]{1,2})$/.exec(ticker || '');
+    return (m && SUFFIX_CCY[m[1]]) || fallback;
+  };
+  const MA_COLORS = { WMA: 'var(--amber, #f80)', SMA: 'var(--accent, #09f)', EMA: 'var(--purple, #c6f)' };
   const OSC_COLORS = ['#4cc9f0', '#f472b6', '#a3e635'];
   const SimpleCandles = memo(function SimpleCandles({ ticker, data, strategy, row, currency }){
     const host = useRef(null);
@@ -141,15 +150,24 @@ window.StockScannerUI = window.StockScannerUI || {};
       }catch(e){ console.warn('Onix modo simple:', e); setOk(false); }
       return () => { ro?.disconnect(); oscCharts.forEach(oc => renderer.disposeChart(oc)); renderer.disposeChart(chart); };
     }, [ticker, data, strategy, oscFilters]);
-    const lines = (strategy.entry || []).flatMap(f => [f, f.cmpType === 'ind' ? { ind: f.cmpInd, params: f.cmpParams } : null])
-      .filter(f => f && ['WMA', 'SMA', 'EMA'].includes(f.ind)).map(f => `${f.ind}(${f.params.p})`);
+    // Medias dibujadas sobre las velas (mismo orden y color que en el gráfico): las de la regla
+    // en su color y las de comparación en gris discontinuo.
+    const isMa = f => f && ['WMA', 'SMA', 'EMA'].includes(f.ind);
+    const maLegend = [];
+    const addMa = (f, cmp) => { const label = `${f.ind} ${f.params.p}`; if(!maLegend.some(m => m.label === label)) maLegend.push({ label, cmp, color: cmp ? 'var(--chart-muted-line, #6b7890)' : MA_COLORS[f.ind] }); };
+    (strategy.entry || []).filter(isMa).forEach(f => addMa(f, false));
+    (strategy.entry || []).filter(f => f.cmpType === 'ind').map(f => ({ ind: f.cmpInd, params: f.cmpParams })).filter(isMa).forEach(f => addMa(f, true));
+    const lines = maLegend.map(m => m.label);
     return (
       <figure className="simple-candles">
         <figcaption className="simple-candles-head">
-          <div><strong>{ticker}</strong>{row && <span>{`${num(row.price)} ${currency}`}</span>}{row && <em className={row.chg >= 0 ? 'up' : 'down'}>{pct(row.chg)}</em>}</div>
-          <small>{`Velas semanales · últimos 2 años${lines.length ? ' · ' + [...new Set(lines)].join(', ') : ''}`}</small>
+          <div><strong>{ticker}</strong>{row && <span>{`${num(row.price)} ${currencyOf(ticker, currency)}`.trim()}</span>}{row && <em className={row.chg >= 0 ? 'up' : 'down'}>{pct(row.chg)}</em>}</div>
+          <small>Velas semanales · últimos 2 años</small>
         </figcaption>
-        <div ref={host} className="simple-candles-chart" role="img" aria-label={`Gráfico de velas semanales de ${ticker}`}/>
+        <div className="simple-candles-wrap">
+          {maLegend.length > 0 && <span className="simple-osc-label simple-ma-label">{maLegend.map(m => <span key={m.label}><i className={m.cmp ? 'cmp' : ''} style={{ background: m.color }}/>{m.label}</span>)}</span>}
+          <div ref={host} className="simple-candles-chart" role="img" aria-label={`Gráfico de velas semanales de ${ticker}${lines.length ? ' con ' + lines.join(' y ') : ''}`}/>
+        </div>
         {oscFilters.length > 0 && <div className="simple-osc">
           <span className="simple-osc-label">{oscFilters.map((f, i) => <span key={f.ind + f.params.p}><i style={{ background: OSC_COLORS[i % OSC_COLORS.length] }}/>{f.ind === 'RSI' ? `RSI ${f.params.p}` : `Stoch ${f.params.p}`}</span>)}</span>
           <div ref={el => { oscRefs.current[0] = el; }} className="simple-osc-chart" role="img" aria-label={`${oscFilters.map(f => f.ind === 'RSI' ? 'RSI' : 'Estocástico').join(' y ')} de ${ticker}`}/>

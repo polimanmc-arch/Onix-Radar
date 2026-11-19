@@ -415,3 +415,9 @@ body,[data-theme="light"] body{background:var(--bg-0);background-image:none}
 .simple-table-pick{font-size:13px}
 .simple-table-pick th,.simple-table-pick td{padding:6px 5px}
 .simple-table-pick th{font-size:11.5px}
+
+/* Leyenda de las medias sobre el gráfico de velas */
+.simple-candles-wrap{position:relative}
+.simple-ma-label{top:6px;left:6px}
+.simple-ma-label i{height:3px}
+.simple-ma-label i.cmp{height:0;background:none!important;border-top:2px dashed var(--chart-muted-line,#6b7890)}
