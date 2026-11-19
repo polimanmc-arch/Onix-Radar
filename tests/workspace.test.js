@@ -287,31 +287,6 @@ test('analysis view shows the performance report with monthly heatmap, drawdowns
   await Renderer.act(async()=>tree.unmount());
 });
 
-test('scanner computes historical signal performance on demand from the scanned data',async()=>{
-  const {tree,window}=await mountApp();
-  const app=tree.root.find(n=>n.type?.name==='ScannerTab').props.ctx;
-  const now=1800000000;
-  const series=shift=>{
-    // Tendencia alcista con caídas cada 9 semanas; cierres cerca del mínimo (estocástico bajo).
-    const oldest=[]; let p=50;
-    for(let i=0;i<220;i++){ const k=(i+shift)%9; p*= k===7||k===8 ? 0.95 : 1.02; oldest.push(p); }
-    const closes=oldest.reverse();
-    return {ok:true,closes,opens:closes.map(c=>c*1.002),highs:closes.map(c=>c*1.05),lows:closes.map(c=>c*0.995),volumes:closes.map(()=>1e6),times:closes.map((_,i)=>now-i*7*86400)};
-  };
-  const rows=['AAPL','MSFT','NVDA'].map((ticker,k)=>{ app.dataCacheRef.current[ticker]={'1wk':series(k*5),'1d':series(k)}; return {ticker,name:ticker,passed:true,price:100,chg:1,fRes:[],shortFRes:[],spark:[],mainTf:'1wk'}; });
-  await Renderer.act(async()=>window.scannerState.setResults(rows));
-  const panel=()=>tree.root.findByProps({'aria-label':'Rendimiento histórico de la señal'});
-  const button=()=>panel().findByType('button');
-  assert.equal(button().children.join(''),'Calcular');
-  await Renderer.act(async()=>{ await button().props.onClick(); });
-  const json=JSON.stringify(tree.toJSON());
-  assert.equal(button().children.join(''),'Recalcular');
-  assert.equal(panel().findAllByProps({'aria-label':'Retornos tras la señal'}).length,1,'synthetic oscillating prices trigger the default filters');
-  assert.ok(json.includes('de 3 símbolos'));
-  assert.ok(json.includes('13 semanas'));
-  await Renderer.act(async()=>tree.unmount());
-});
-
 test('walk-forward panel runs from the current backtest rules and applies the last fold parameters',async()=>{
   const {tree,window}=await mountApp();
   const app=tree.root.find(n=>n.type?.name==='ScannerTab').props.ctx;

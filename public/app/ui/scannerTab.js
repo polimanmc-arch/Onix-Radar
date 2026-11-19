@@ -784,98 +784,11 @@ function ScannerTab({ ctx }){
         </section>
         <ScannerInspector row={row} dataCacheRef={dataCacheRef} onOpen={ctx.setSelectedChart} side={ctx.scanDirection} filters={ctx.scanDirection==='short'?ctx.shortFilters:ctx.filters}/>
       </div>
-      {hasResults&&!scanning&&<SignalPerformancePanel ctx={ctx} selectedTicker={row?.ticker}/>}
       {logLines.length>0&&<div className="workspace-log">
         <button type="button" style={S.ghostBtn} aria-expanded={logOpen} onClick={()=>setLogOpen(v=>!v)}>Actividad {logOpen?'−':'+'}</button>
         {logOpen&&<div style={{...S.panel,marginTop:6,padding:12,maxHeight:160,overflow:'auto'}}>{logLines.map((line,i)=><div key={i} style={{fontSize:10,lineHeight:1.7,color:'var(--text-2)',fontFamily:'var(--font-mono)'}}>{line}</div>)}</div>}
       </div>}
     </div>
-  );
-}
-
-// ── Rendimiento histórico de la señal ───────────────────────────────────────
-// Recorre el historial ya descargado del universo escaneado y mide qué pasó después de cada
-// vela en la que se cumplían los filtros actuales, frente a la media de todas las velas.
-function SignalPerformancePanel({ ctx, selectedTicker }){
-  const {S,dataCacheRef,scanDirection,scanning}=ctx;
-  const filters=scanDirection==='short'?ctx.shortFilters:ctx.filters;
-  const [state,setState]=useState({status:'idle'});
-  const [progress,setProgress]=useState(null);
-  const runId=useRef(0);
-  useEffect(()=>{ runId.current++; setState({status:'idle'}); setProgress(null); },[filters,scanDirection,scanning]);
-  useEffect(()=>()=>{ runId.current++; },[]);
-  const run=async()=>{
-    const id=++runId.current;
-    setState({status:'running'}); setProgress(null);
-    try{
-      const out=await window.StockScannerCore.computeSignalPerformance({
-        dataByTicker:dataCacheRef.current, filters, direction:scanDirection,
-        yieldToUi:()=>new Promise(resolve=>setTimeout(resolve,0)),
-        isCancelled:()=>runId.current!==id,
-        onProgress:p=>{ if(runId.current===id) setProgress(p); },
-      });
-      if(runId.current!==id) return;
-      setState(out.ok?{status:'done',result:out}:{status:'error',message:out.message||'No se pudo calcular.'});
-    }catch(error){
-      if(runId.current===id) setState({status:'error',message:error?.message||'Error'});
-    }
-  };
-  const pct=v=>v==null||!Number.isFinite(v)?'-':`${v>=0?'+':''}${(v*100).toFixed(2)}%`;
-  const rate=v=>v==null?'-':`${(v*100).toFixed(0)}%`;
-  const fmtDate=t=>t?new Date(t*1000).toISOString().slice(0,10):'-';
-  const tone=v=>v==null?'var(--text-2)':v>0?'var(--green)':v<0?'var(--red)':'var(--text-2)';
-  const r=state.result;
-  const mine=r&&selectedTicker?r.byTicker[selectedTicker]:null;
-  const th={fontSize:10,color:'var(--text-3)',fontWeight:600,padding:'6px 8px',textAlign:'right',borderBottom:'1px solid var(--row-divider)',whiteSpace:'nowrap'};
-  const td={fontSize:12,padding:'7px 8px',textAlign:'right',fontVariantNumeric:'tabular-nums',borderBottom:'1px solid var(--row-divider)',whiteSpace:'nowrap'};
-  return (
-    <section className="signal-performance" aria-label="Rendimiento histórico de la señal" style={{...S.panel,marginTop:10,padding:14}}>
-      <div style={{display:'flex',justifyContent:'space-between',alignItems:'flex-start',gap:12,flexWrap:'wrap'}}>
-        <div style={{minWidth:0,flex:'1 1 280px'}}>
-          <strong style={{fontSize:13}}>Rendimiento histórico de la señal</strong>
-          <div style={{fontSize:11,color:'var(--text-2)',marginTop:3}}>Qué pasó en el universo escaneado después de cada vela en la que se cumplían estos filtros, frente a la media de todas las velas.</div>
-        </div>
-        <button type="button" style={S.ghostBtn} onClick={run} disabled={state.status==='running'} aria-busy={state.status==='running'}>
-          {state.status==='running'?'Calculando…':state.status==='done'?'Recalcular':'Calcular'}
-        </button>
-      </div>
-      {state.status==='running'&&<div role="status" style={{fontSize:11,color:'var(--text-2)',marginTop:10}}>{`Analizando ${progress?progress.done+'/'+progress.total+' ':''}símbolos…`}</div>}
-      {state.status==='error'&&<div role="alert" style={{fontSize:11,color:'var(--amber)',marginTop:10}}>{state.message}</div>}
-      {state.status==='done'&&r&&<>
-        <div style={{fontSize:11,color:'var(--text-2)',margin:'10px 0 6px'}}>
-          {`${r.signals.toLocaleString()} señales (${r.episodes.toLocaleString()} episodios) en ${r.tickersWithSignals} de ${r.tickersUsed} símbolos · ${fmtDate(r.firstTime)} → ${fmtDate(r.lastTime)} · base ${r.baseTf.toUpperCase()} · ${r.direction==='short'?'Short':'Long'}`}
-        </div>
-        {r.signals>0?<div style={{overflowX:'auto'}}>
-          <table aria-label="Retornos tras la señal" style={{width:'100%',borderCollapse:'collapse',minWidth:560}}>
-            <thead><tr>
-              <th style={{...th,textAlign:'left'}}>Horizonte</th><th style={th}>Señales</th><th style={th}>Retorno medio</th><th style={th}>Mediana</th>
-              <th style={th}>% acierto</th><th style={th} title="Retorno medio de todas las velas evaluables del universo">Base</th><th style={th} title="Retorno medio con señal menos base">Ventaja</th>
-            </tr></thead>
-            <tbody>{r.aggregate.map(a=>(
-              <tr key={a.bars}>
-                <td style={{...td,textAlign:'left'}}>{a.label}</td>
-                <td style={td}>{a.n.toLocaleString()}</td>
-                <td style={{...td,color:tone(a.mean),fontWeight:600}}>{pct(a.mean)}</td>
-                <td style={{...td,color:tone(a.median)}}>{pct(a.median)}</td>
-                <td style={td}>{rate(a.hitRate)} <span style={{color:'var(--text-3)',fontSize:10}}>{`vs ${rate(a.baseHitRate)}`}</span></td>
-                <td style={{...td,color:'var(--text-2)'}}>{pct(a.baseMean)}</td>
-                <td style={{...td,color:tone(a.edge),fontWeight:700}}>{pct(a.edge)}</td>
-              </tr>
-            ))}</tbody>
-          </table>
-        </div>:<div style={{fontSize:12,color:'var(--text-2)'}}>Los filtros no se cumplieron en ninguna vela cerrada del historial disponible.</div>}
-        {selectedTicker&&<div style={{fontSize:11,color:'var(--text-2)',marginTop:10}}>
-          {mine?`${selectedTicker}: ${mine.signals} señales (${mine.episodes} episodios) · `+mine.horizons.map((h,i)=>`${r.horizons[i].label} ${pct(h.mean)} (${rate(h.hitRate)} acierto)`).join(' · ')
-            :`${selectedTicker}: sin señales en el historial disponible.`}
-        </div>}
-        <ul style={{fontSize:10,color:'var(--text-3)',margin:'10px 0 0',paddingLeft:16,lineHeight:1.6}}>
-          <li>Entrada en la apertura siguiente a la vela de señal y salida al cierre tras el horizonte, sin costes. Sólo velas cerradas en todas las temporalidades.</li>
-          <li>Las señales consecutivas de un mismo símbolo se solapan; los episodios cuentan sólo la primera vela de cada racha.</li>
-          <li>El universo es el actual: los símbolos que dejaron de cotizar no aparecen (sesgo de supervivencia).</li>
-          {r.usesMeta&&<li style={{color:'var(--amber)'}}>Los filtros fundamentales usan valores actuales en todo el historial.</li>}
-        </ul>
-      </>}
-    </section>
   );
 }
 
