@@ -87,3 +87,24 @@ test('"Todo el mercado" downloads every US stock once and adds Europe, indices, 
   assert.equal(o.btUniverseSource,'custom'); assert.equal(o.btCustomTickers.split(', ').length,list.length);
   await assert.rejects(c.resolveSimpleUniverse({...market,id:'OTHER'},async()=>({json:async()=>({})})),/lista/);
 });
+
+test('base strategy uses the expert market filter on the S&P 500 (weekly WMA 30 rising) in the backtest and the scanner',()=>{
+  const ctx=vm.createContext({window:{},console});
+  vm.runInContext(fs.readFileSync(path.join(root,'public/app/core/simpleSimulator.js'),'utf8'),ctx);
+  const c=ctx.window.StockScannerCore;
+  const base=c.SIMPLE_STRATEGIES.find(s=>s.id==='base');
+  const o=c.buildSimpleBacktestOptions({market:{id:'DOW30',preset:'DOW30',benchmark:'DIA'},strategy:base,period:{weeks:52}});
+  assert.equal(o.mktFilterEnabled,true); assert.equal(o.mktRegimeTicker,'SPY'); assert.equal(o.btBenchmark,'DIA','the comparison stays with the chosen market');
+  const rule=o.mktFilterRules[0].conditions[0];
+  assert.equal(rule.ind,'WMA'); assert.equal(rule.params.p,30); assert.equal(rule.cmpType,'prev'); assert.equal(rule.tf,'1wk');
+  const trend=c.buildSimpleBacktestOptions({market:{id:'DOW30',preset:'DOW30',benchmark:'DIA'},strategy:c.SIMPLE_STRATEGIES.find(s=>s.id==='trend'),period:{weeks:52}});
+  assert.equal(trend.mktFilterEnabled,false);
+  // Escáner: el estado del filtro se calcula con la última vela semanal cerrada del SPY.
+  let seen=null;
+  ctx.window.StockScannerCore.buildSignalSliceFromIndex=(d)=>({ok:true,closes:d.closes});
+  ctx.window.StockScannerCore.testFilterAligned=(f,data)=>{ seen=f; return {pass:data['1wk'].closes[0]>100,val:1}; };
+  const up=c.scanSimpleMarket({tickers:[],dataByTicker:{SPY:{'1wk':{ok:true,closes:[120]}}},strategy:base});
+  assert.equal(up.market.ok,true); assert.equal(up.market.name,'S&P 500'); assert.equal(seen.ind,'WMA');
+  assert.equal(c.scanSimpleMarket({tickers:[],dataByTicker:{SPY:{'1wk':{ok:true,closes:[90]}}},strategy:base}).market.ok,false);
+  assert.equal(c.scanSimpleMarket({tickers:[],dataByTicker:{},strategy:base}).market.ok,null);
+});

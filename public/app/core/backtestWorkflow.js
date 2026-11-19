@@ -11,6 +11,7 @@
       savedUniverseLists,
       mktFilterEnabled, mktFilterTicker, mktFilterTf,
       mktFilterInd, mktFilterPeriod, mktFilterOp, mktFilterVal, mktFilterRules,
+      mktRegimeTicker = null, // activo del filtro de mercado; por defecto, el benchmark
       savedStrategiesLength, dataCacheRef, abortSignal,
       setBtRunning, setBtProgress, setTab, setBacktest,
     } = opts;
@@ -595,7 +596,7 @@
           const regimeRules=(mktFilterRules&&mktFilterRules.length)?mktFilterRules:[];
           const regimeTfs=[...new Set(regimeRules.flatMap(g=>g.conditions?.map(c=>c.tf)||[]))];
           mktDataByTf={};
-          const entries=await Promise.all(regimeTfs.map(async tf=>[tf,await fetchAndCache(btBenchmark,tf,16000)]));
+          const entries=await Promise.all(regimeTfs.map(async tf=>[tf,await fetchAndCache(mktRegimeTicker||btBenchmark,tf,16000)]));
           entries.forEach(([tf,d])=>{ if(d?.ok) mktDataByTf[tf]=d; });
         }catch(e){ console.warn('[Onix] Market regime fetch failed:', e); mktDataByTf=null; }
       }
@@ -1036,7 +1037,7 @@
         perf:{...perfMarks,totalMs,stages:perfStages,alignedCacheSize:maxWeekAlignedCacheSize,tickers:validTickers.length,loadStats,tickerIssues:tickerIssues.slice(0,500),signalStats,intrabarFetches,validTrades:validTrades.length,invalidTrades:allTrades.length-validTrades.length,lightMemory:backtestLocalOnlyCache,trimmedSeriesCount,trimmedBarsSaved,maxRuleLookback,simulationChunkSize,simulationChunks,simulationYieldCount,fastRuleEvalCount:ruleEvaluator.stats.evalCount,fastRuleFallbackCount:ruleEvaluator.stats.fallbackCount,cacheEntriesBefore,cacheEntriesAfter,cacheTickersReleased,batchChartRequests,batchChartSymbols,batchFetchConcurrency,transientCacheHits,transientCacheWrites,transientCacheReleased,transientCacheRemaining:transientDataCache.size,cooperativeYieldCount,cooperativeLongSliceCount},
         pointInTime:membership?{index:'S&P 500',source:membership.source,lastChange:membership.lastChange,
           avgCoverage:pitStats.weeks?pitStats.coverageSum/pitStats.weeks:null,first:pitStats.first,last:pitStats.last,removalExits:pitStats.removalExits}:null,
-        mktFilter:mktFilterEnabled?{enabled:true,ticker:btBenchmark,ind:'Reglas',period:(mktFilterRules||[]).length,label:'Reglas sobre '+btBenchmark,rulesCount:(mktFilterRules||[]).length,blockedWeeks:mktFilterBlockedWeeks,totalWeeks:equityCurve.length}:null,
+        mktFilter:mktFilterEnabled?{enabled:true,ticker:mktRegimeTicker||btBenchmark,ind:'Reglas',period:(mktFilterRules||[]).length,label:'Reglas sobre '+(mktRegimeTicker||btBenchmark),rulesCount:(mktFilterRules||[]).length,blockedWeeks:mktFilterBlockedWeeks,totalWeeks:equityCurve.length}:null,
       };
       report('Finalizando resultados',1,1);
       setBacktest(result);

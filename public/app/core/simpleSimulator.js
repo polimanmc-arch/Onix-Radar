@@ -58,6 +58,7 @@
     SMA10: { name: 'SMA 10', what: 'Media móvil simple de 10 semanas: tendencia de corto plazo.' },
     RSI14: { name: 'RSI 14', what: 'Índice de fuerza relativa de 14 semanas (0-100): por encima de 60 indica fuerza sostenida.' },
     HIGH52: { name: 'Distancia al máximo 52 sem.', what: 'Cuánto cotiza por debajo de su precio máximo del último año.' },
+    MKT_SPX: { name: 'Filtro S&P 500', what: 'Filtro de mercado (el mismo del modo experto): sólo se opera si la media ponderada de 30 semanas del S&P 500 (SPY) sube. Si baja, no compra y vende lo que tenga.' },
   };
   // Cómo se evalúa todo el proceso (igual para todas las estrategias).
   const PROCESS_METRICS = [
@@ -70,11 +71,13 @@
     {
       id: 'base', icon: '🎯', name: 'Estrategia base Radar Onix', level: 'Rebote en tendencia', isBase: true,
       pitch: 'Compra acciones con tendencia alcista que acaban de sufrir una caída fuerte, para aprovechar el rebote.',
-      buy: 'La tendencia de fondo sube, el RSI marca sobreventa y la semana cerró cerca de su mínimo.',
-      sell: 'La tendencia de fondo se gira, o el RSI y el estocástico marcan sobrecompra.',
-      indicators: [IND.WMA30, IND.RSI4, IND.STOCH1],
-      rulesBuy: ['WMA(30) sube respecto a la semana anterior', 'RSI(4) < 35', 'Estocástico %K(1) < 20'],
-      rulesSell: ['WMA(30) baja respecto a la semana anterior', 'o bien RSI(4) > 65 y Estocástico %K(1) > 80'],
+      buy: 'El S&P 500 está en tendencia alcista, la tendencia de fondo de la acción sube, el RSI marca sobreventa y la semana cerró cerca de su mínimo.',
+      sell: 'La tendencia de fondo se gira, el RSI y el estocástico marcan sobrecompra, o el S&P 500 se vuelve bajista.',
+      indicators: [IND.WMA30, IND.RSI4, IND.STOCH1, IND.MKT_SPX],
+      rulesBuy: ['Filtro de mercado: WMA(30) del S&P 500 sube', 'WMA(30) sube respecto a la semana anterior', 'RSI(4) < 35', 'Estocástico %K(1) < 20'],
+      rulesSell: ['WMA(30) baja respecto a la semana anterior', 'o bien RSI(4) > 65 y Estocástico %K(1) > 80', 'o bien la WMA(30) del S&P 500 baja (vende todo y no compra)'],
+      // Filtro de mercado del modo experto (WMA 30 semanal subiendo), evaluado sobre el S&P 500.
+      market: { ticker: 'SPY', name: 'S&P 500', rule: c('WMA', '>', 'prev', { params: { p: 30 } }), on: 'WMA(30) del S&P 500 subiendo', off: 'WMA(30) del S&P 500 bajando' },
       entry: [c('WMA', '>', 'prev', { params: { p: 30 } }), c('RSI', '<', 35, { params: { p: 4 } }), c('STOCH', '<', 20, { params: { p: 1, ks: 1, dp: 1 } })],
       exit: [[c('WMA', '<', 'prev', { params: { p: 30 } })], [c('RSI', '>', 65, { params: { p: 4 } }), c('STOCH', '>', 80, { params: { p: 1, ks: 1, dp: 1 } })]],
       columns: [
@@ -158,7 +161,9 @@
       btUniverseSource: explicitUniverse(market) ? 'custom' : market.preset,
       btCustomTickers: explicitUniverse(market) ? universeTickers(market).join(', ') : '',
       btUniverseLimit: 0, savedUniverseLists: [], btLightMemory: false,
-      mktFilterEnabled: false, mktFilterTicker: market.benchmark, mktFilterTf: '1wk', mktFilterRules: [],
+      mktFilterEnabled: !!strategy.market, mktFilterTicker: strategy.market?.ticker || market.benchmark, mktFilterTf: '1wk',
+      mktFilterRules: strategy.market ? [{ _id: 'mkt', conditions: withIds([strategy.market.rule]) }] : [],
+      mktRegimeTicker: strategy.market?.ticker || null,
       savedStrategiesLength: 0,
     };
   }
@@ -260,6 +265,16 @@
   }
 
   // Escáner sobre la última vela semanal cerrada (como el scanner del modo experto).
+  function marketFilterStatus({ strategy, dataByTicker }){
+    if(!strategy.market) return null;
+    const { buildSignalSliceFromIndex, testFilterAligned } = window.StockScannerCore;
+    const d = dataByTicker?.[strategy.market.ticker]?.['1wk'];
+    const slice = d?.ok ? buildSignalSliceFromIndex(d, 1) : null;
+    if(!slice?.ok) return { ...strategy.market, ok: null };
+    const r = testFilterAligned(strategy.market.rule, { '1wk': slice, _meta: {} });
+    return { ...strategy.market, ok: !!r.pass, value: r.val, price: slice.closes[0] };
+  }
+
   function scanMarket({ tickers, dataByTicker, strategy }){
     const { buildSignalSliceFromIndex, testFilterAligned } = window.StockScannerCore;
     const rows = [];
@@ -276,7 +291,7 @@
       rows.push({ ticker, price, chg: prev ? price / prev - 1 : null, values: strategy.columns.map(col => col.get(fr)), sharpe1y: sharpe52(slice.closes) });
     }
     rows.sort((a, b) => (b.sharpe1y ?? -Infinity) - (a.sharpe1y ?? -Infinity));
-    return { analyzed, passing: rows };
+    return { analyzed, passing: rows, market: marketFilterStatus({ strategy, dataByTicker }) };
   }
 
   const CANDIDATES = 40;

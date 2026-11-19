@@ -3,7 +3,7 @@
 // Reutiliza el escáner, el optimizador de portafolios y el backtest del modo experto.
 window.StockScannerUI = window.StockScannerUI || {};
 (function(){
-  const { useState, useRef, useEffect } = React;
+  const { useState, useRef, useEffect, useMemo, memo } = React;
   const GAMES_KEY = 'onix_simple_games_v1';
   const core = () => window.StockScannerCore;
 
@@ -27,7 +27,7 @@ window.StockScannerUI = window.StockScannerUI || {};
   }
 
   // Estrategia frente al índice.
-  function SimpleChart({ summary, currency, holdLabel }){
+  const SimpleChart = memo(function SimpleChart({ summary, currency, holdLabel }){
     const W = 640, H = 230, padL = 58, padR = 14, padT = 12, padB = 26;
     const a = summary.curve, b = summary.bench;
     const all = [summary.capital, ...a.map(p => p.value), ...b.map(p => p.value)];
@@ -57,11 +57,14 @@ window.StockScannerUI = window.StockScannerUI || {};
         </figcaption>
       </figure>
     );
-  }
+  });
 
   // Frontera eficiente: miles de combinaciones de pesos (riesgo, rentabilidad) y el portafolio elegido.
-  function FrontierChart({ portfolio }){
-    const pts = (portfolio.frontier || []).filter(p => Number.isFinite(p.vol) && Number.isFinite(p.ret));
+  const FrontierChart = memo(function FrontierChart({ portfolio }){
+    // Como mucho ~900 puntos: el dibujo es igual y el SVG pesa mucho menos.
+    const all = (portfolio.frontier || []).filter(p => Number.isFinite(p.vol) && Number.isFinite(p.ret));
+    const step = Math.max(1, Math.ceil(all.length / 900));
+    const pts = step > 1 ? all.filter((_, i) => i % step === 0) : all;
     const chosen = portfolio.chosenPoint, ew = portfolio.altEqualWeightPoint;
     if(pts.length < 5 || !chosen) return null;
     const W = 460, H = 280, padL = 46, padR = 12, padT = 12, padB = 36;
@@ -94,31 +97,47 @@ window.StockScannerUI = window.StockScannerUI || {};
         </figcaption>
       </figure>
     );
-  }
+  });
 
   // Gráfico de velas semanales del valor seleccionado en el escáner (mismo motor que el inspector experto).
-  function SimpleCandles({ ticker, data, strategy, row, currency }){
+  const SimpleCandles = memo(function SimpleCandles({ ticker, data, strategy, row, currency }){
     const host = useRef(null);
+    const oscRefs = useRef([]);
     const [ok, setOk] = useState(true);
+    const oscFilters = useMemo(() => (strategy.entry || []).filter(f => ['RSI', 'STOCH'].includes(f.ind)), [strategy]);
     useEffect(() => {
       const renderer = window.StockScannerUI?.ChartRenderer;
       if(!host.current || !data?.ok || !window.LightweightCharts || !renderer){ setOk(false); return; }
-      let chart = null, ro = null;
+      let chart = null, ro = null; const oscCharts = [];
       try{
         const times = [...data.times].reverse();
         const candles = times.map((time, i) => { const k = times.length - 1 - i;
           return { time, open: data.opens?.[k] ?? data.closes[k], high: data.highs[k], low: data.lows[k], close: data.closes[k] }; });
         chart = renderer.buildPriceChart(host.current, data, times, candles, {
           activeFilters: strategy.entry, activeEntryRules: [], activeExitRules: [], chartTf: '1wk', backtestTrades: [],
-          showExitInfo: false, showVolume: true, showIndicators: true, setCrossInfo: () => {}, priceHeight: host.current.clientHeight || 340,
+          showExitInfo: false, showVolume: true, showIndicators: true, setCrossInfo: () => {}, priceHeight: host.current.clientHeight || 300,
         });
+        // Un panel por oscilador, con el nivel de compra y el de venta de la estrategia.
+        oscFilters.forEach((f, i) => {
+          const el = oscRefs.current[i]; if(!el) return;
+          const exits = (strategy.exit || []).flat().filter(x => x.ind === f.ind && x.cmpType === 'val');
+          const oc = renderer.buildOscChart(el, chart, data, times, '1wk', { activeFilters: [f], activeExitRules: [{ conditions: exits }], showExitInfo: true, oscHeight: el.clientHeight || 110 });
+          if(oc) oscCharts.push(oc);
+        });
+        // Misma anchura de escala en todos los paneles para que las fechas queden alineadas; sólo el último muestra el eje de fechas.
+        [chart, ...oscCharts].forEach((ch, i, arr) => ch.applyOptions({ rightPriceScale: { minimumWidth: 78 }, timeScale: { visible: i === arr.length - 1 } }));
         if(times.length > 104) chart.timeScale().setVisibleLogicalRange({ from: times.length - 104, to: times.length + 2 });
-        ro = new ResizeObserver(() => host.current && chart.applyOptions({ width: host.current.clientWidth, height: host.current.clientHeight || 340 }));
+        ro = new ResizeObserver(() => {
+          if(!host.current) return;
+          const w = host.current.clientWidth;
+          chart.applyOptions({ width: w, height: host.current.clientHeight || 300 });
+          oscCharts.forEach(oc => oc.applyOptions({ width: w }));
+        });
         ro.observe(host.current);
         setOk(true);
       }catch(e){ console.warn('Onix modo simple:', e); setOk(false); }
-      return () => { ro?.disconnect(); renderer.disposeChart(chart); };
-    }, [ticker, data, strategy]);
+      return () => { ro?.disconnect(); oscCharts.forEach(oc => renderer.disposeChart(oc)); renderer.disposeChart(chart); };
+    }, [ticker, data, strategy, oscFilters]);
     const lines = (strategy.entry || []).flatMap(f => [f, f.cmpType === 'ind' ? { ind: f.cmpInd, params: f.cmpParams } : null])
       .filter(f => f && ['WMA', 'SMA', 'EMA'].includes(f.ind)).map(f => `${f.ind}(${f.params.p})`);
     return (
@@ -128,14 +147,20 @@ window.StockScannerUI = window.StockScannerUI || {};
           <small>{`Velas semanales · últimos 2 años${lines.length ? ' · ' + [...new Set(lines)].join(', ') : ''}`}</small>
         </figcaption>
         <div ref={host} className="simple-candles-chart" role="img" aria-label={`Gráfico de velas semanales de ${ticker}`}/>
+        {oscFilters.map((f, i) => (
+          <div key={f.ind + f.params.p} className="simple-osc">
+            <span className="simple-osc-label">{f.ind === 'RSI' ? `RSI ${f.params.p}` : `Estocástico %K ${f.params.p}`}</span>
+            <div ref={el => { oscRefs.current[i] = el; }} className="simple-osc-chart" role="img" aria-label={`${f.ind === 'RSI' ? 'RSI' : 'Estocástico'} de ${ticker}`}/>
+          </div>
+        ))}
         {!ok && <p className="simple-note">No hay gráfico disponible para este valor.</p>}
       </figure>
     );
-  }
+  });
 
   // Gráfico de dona con leyenda: reparto del dinero por acción o por sector.
   const DONUT_COLORS = ['#5b8cff', '#2ec4a6', '#f5a623', '#e8577c', '#9b6dff', '#3fb8e6', '#8bc34a', '#ff7a45', '#d4b106', '#c06fd6', '#4dd0a0', '#ef6461'];
-  function Donut({ items, title, center, currency }){
+  const Donut = memo(function Donut({ items, title, center, currency }){
     const R = 70, SW = 26, CIRC = 2 * Math.PI * R;
     const total = items.reduce((t, i) => t + i.weight, 0) || 1;
     let acc = 0;
@@ -158,7 +183,7 @@ window.StockScannerUI = window.StockScannerUI || {};
         </div>
       </figure>
     );
-  }
+  });
 
   const STAGES = [ { id: 'scan', label: 'Escáner' }, { id: 'portfolio', label: 'Portafolio Markowitz' }, { id: 'backtest', label: 'Backtest' } ];
 
@@ -173,6 +198,9 @@ window.StockScannerUI = window.StockScannerUI || {};
     const [years, setYears] = useState(3);
     const [stage, setStage] = useState('idle');
     const [progress, setProgress] = useState('');
+    const [progressPct, setProgressPct] = useState(null);
+    const [startedAt, setStartedAt] = useState(null);
+    const [, setTick] = useState(0);
     const [run, setRun] = useState(null);
     const [error, setError] = useState(null);
     const [games, setGames] = useState(loadGames);
@@ -180,6 +208,12 @@ window.StockScannerUI = window.StockScannerUI || {};
     const abortRef = useRef(null);
     const sectionRef = useRef(null);
     useEffect(() => () => abortRef.current?.abort(), []);
+    // Cronómetro visible mientras corre el análisis (para ver que sigue trabajando).
+    useEffect(() => {
+      if(!startedAt || typeof setInterval !== 'function') return undefined;
+      const id = setInterval(() => setTick(t => t + 1), 1000);
+      return () => clearInterval(id);
+    }, [startedAt]);
 
     const market = markets.find(m => m.id === marketId);
     const group = groups.find(g => g.id === market?.group) || groups[0];
@@ -193,14 +227,19 @@ window.StockScannerUI = window.StockScannerUI || {};
       if(!ready) return;
       const ac = new AbortController(); abortRef.current = ac;
       const cfg = { market, strategy, period };
-      setError(null); setRun({ ...cfg }); setSelTicker(null);
+      setError(null); setRun({ ...cfg }); setSelTicker(null); setStartedAt(Date.now()); setProgressPct(null);
+      const n = n => Number(n).toLocaleString('es-ES');
       setTimeout(() => sectionRef.current?.scrollIntoView?.({ behavior: 'smooth', block: 'start' }), 60);
       try{
         // 1. Escáner
-        setStage('scan'); setProgress('Descargando precios semanales');
+        setStage('scan'); setProgress('Preparando la descarga de precios');
         if(!C.simpleUniverseReady(market)) setProgress('Descargando la lista de todas las acciones del mercado');
         const tickers = await C.resolveSimpleUniverse(market);
-        await C.loadSimpleWeekly({ tickers, cacheRef, signal: ac.signal, onProgress: (d, t) => setProgress(`Descargando precios ${d} de ${t}`) });
+        // También el S&P 500 si la estrategia usa el filtro de mercado.
+        const toLoad = strategy.market ? [...new Set([...tickers, strategy.market.ticker])] : tickers;
+        setProgress(`Descargando precios semanales de ${n(toLoad.length)} activos`); setProgressPct(0);
+        await C.loadSimpleWeekly({ tickers: toLoad, cacheRef, signal: ac.signal, onProgress: (d, t) => { setProgress(`Descargando precios ${n(d)} de ${n(t)}`); setProgressPct(d / t * 100); } });
+        setProgressPct(null);
         const scan = C.scanSimpleMarket({ tickers, dataByTicker: cacheRef.current, strategy });
         setRun(r => ({ ...r, scan: { ...scan, total: tickers.length } }));
 
@@ -215,12 +254,15 @@ window.StockScannerUI = window.StockScannerUI || {};
         setRun(r => ({ ...r, portfolio, portfolioError }));
 
         // 3. Backtest de la estrategia
-        setStage('backtest'); setProgress('Simulando semana a semana');
+        setStage('backtest'); setProgress('Preparando el backtest'); setProgressPct(null);
         let raw = null;
         const out = await C.runBacktestWorkflow({
           ...C.buildSimpleBacktestOptions(cfg), dataCacheRef: cacheRef, abortSignal: ac.signal,
           setBtRunning: () => {}, setTab: () => {}, setBacktest: r => { raw = r; },
-          setBtProgress: p => p?.stage === 'simulation' && setProgress(`Simulando semana a semana… ${Math.round(p.phasePct || 0)} %`),
+          setBtProgress: p => {
+            if(p?.stage === 'simulation'){ setProgress('Simulando semana a semana'); setProgressPct(p.phasePct || 0); }
+            else if(p?.stage === 'data' && p.total > 1){ setProgress(`Preparando los datos ${n(p.done)} de ${n(p.total)}`); setProgressPct(p.done / p.total * 100); }
+          },
         });
         const summary = raw && C.summarizeSimpleResult(raw);
         const backtest = summary ? { summary, annReturn: raw.annReturn, sharpe: raw.sharpe, commissions: raw.totalCommissionPaid } : null;
@@ -233,7 +275,7 @@ window.StockScannerUI = window.StockScannerUI || {};
       }catch(e){
         setStage('idle');
         setError(e?.name === 'AbortError' ? 'Análisis cancelado.' : (e?.message || 'Algo salió mal. Inténtalo de nuevo.'));
-      }finally{ abortRef.current = null; setProgress(''); }
+      }finally{ abortRef.current = null; setProgress(''); setProgressPct(null); setStartedAt(null); }
     };
 
     const stageState = id => {
@@ -248,6 +290,17 @@ window.StockScannerUI = window.StockScannerUI || {};
     const scan = run?.scan, pf = run?.portfolio, bt = run?.backtest;
     const inPortfolio = new Set((pf?.allocations || []).map(a => a.ticker));
     const selected = scan?.passing.some(r => r.ticker === selTicker) ? selTicker : scan?.passing[0]?.ticker;
+    const stockItems = useMemo(() => {
+      if(!pf) return [];
+      const items = pf.allocations.map(a => ({ key: a.ticker, label: a.ticker, sub: a.shortName && a.shortName !== a.ticker ? a.shortName : sectorEs(a.sector), weight: Math.abs(a.weight) }));
+      const cash = 1 - items.reduce((t, i) => t + i.weight, 0);
+      // Con pocas acciones, el límite de 25 % por acción deja parte en efectivo.
+      if(cash > 0.01) items.push({ key: 'cash', label: 'Efectivo', sub: 'límite de 25 % por acción', weight: cash, color: 'var(--text-3)' });
+      return items;
+    }, [pf]);
+    const sectorItems = useMemo(() => (pf?.sectors || []).map(sc => ({ key: sc.name, label: sectorEs(sc.name), sub: `${sc.count} acción${sc.count > 1 ? 'es' : ''}`, weight: sc.weight })), [pf]);
+    const stockCenter = useMemo(() => ({ value: String(pf?.allocations.length || 0), label: 'acciones' }), [pf]);
+    const sectorCenter = useMemo(() => ({ value: String((pf?.sectors || []).length), label: 'sectores' }), [pf]);
     const goTo = id => document.getElementById(id)?.scrollIntoView?.({ behavior: 'smooth', block: 'start' });
     const done = id => stageState(id) === 'done';
     const path = [
@@ -274,6 +327,7 @@ window.StockScannerUI = window.StockScannerUI || {};
                 <span><b>{s.label}</b>{s.state === 'active'
                   ? <small role="status">{progress || 'Trabajando…'}</small>
                   : s.detail && <small>{s.detail}</small>}</span>
+                {s.state === 'active' && <i className={'simple-path-bar' + (progressPct == null ? ' indeterminate' : '')} aria-hidden="true"><i style={progressPct == null ? undefined : { width: Math.max(3, progressPct) + '%' }}/></i>}
               </button>
             </li>))}
         </ol>
@@ -339,12 +393,29 @@ window.StockScannerUI = window.StockScannerUI || {};
         </div>
 
         {run && <div ref={sectionRef}>
+          {running && <div className="simple-loading" role="status" aria-live="polite">
+            <span className="simple-spinner" aria-hidden="true"/>
+            <div className="simple-loading-body">
+              <div className="simple-loading-top">
+                <b>{`Paso ${{ scan: 3, portfolio: 4, backtest: 5 }[stage]} de 5 · ${(STAGES.find(x => x.id === stage) || {}).label || ''}`}</b>
+                <span>{`${progressPct != null ? Math.round(progressPct) + ' % · ' : ''}${startedAt ? Math.max(0, Math.round((Date.now() - startedAt) / 1000)) : 0} s`}</span>
+              </div>
+              <div className="simple-loading-text">{progress || 'Trabajando…'}</div>
+              <div className={'simple-loading-bar' + (progressPct == null ? ' indeterminate' : '')}><i style={progressPct == null ? undefined : { width: Math.max(2, progressPct) + '%' }}/></div>
+              {run.market?.heavy && <small>Universo muy grande: la primera descarga puede tardar 1-2 minutos. Después queda en memoria y las siguientes partidas son mucho más rápidas.</small>}
+            </div>
+          </div>}
           {scan && <section id="simple-panel-scan" className="simple-panel" aria-label="Escáner">
             <header><span className={'simple-panel-n' + (done('scan') ? ' done' : '')}>3</span><div>
               <h2>Escáner · ¿qué acciones cumplen hoy la estrategia?</h2>
               <p>Se revisan todas las acciones del mercado con la última vela semanal cerrada y se quedan las que cumplen las reglas de compra.</p>
               <p className="simple-applied"><b>{`${run.strategy.icon} ${run.strategy.name}:`}</b> {run.strategy.rulesBuy.join(' · ')}</p>
             </div></header>
+            {scan.market && <div className={'simple-market-filter ' + (scan.market.ok ? 'ok' : scan.market.ok === false ? 'off' : 'na')}>
+              <span aria-hidden="true">{scan.market.ok ? '🟢' : scan.market.ok === false ? '🔴' : '⚪'}</span>
+              <div><b>{`Filtro de mercado · ${scan.market.name}: `}{scan.market.ok ? 'alcista' : scan.market.ok === false ? 'bajista' : 'sin datos'}</b>
+                <small>{scan.market.ok ? `${scan.market.on}: la estrategia puede comprar esta semana.` : scan.market.ok === false ? `${scan.market.off}: esta semana la estrategia no compraría (y vendería lo que tenga). Mostramos igualmente las acciones que cumplen las demás reglas.` : 'No se pudo comprobar el filtro de mercado.'}</small></div>
+            </div>}
             <div className="simple-kpis">
               <div><span>Acciones analizadas</span><strong>{scan.analyzed}</strong></div>
               <div><span>Cumplen la estrategia</span><strong>{scan.passing.length}</strong></div>
@@ -352,17 +423,17 @@ window.StockScannerUI = window.StockScannerUI || {};
             </div>
             {scan.passing.length ? <div className="simple-scan-grid">
               <div className="simple-table-wrap"><table className="simple-table simple-table-pick">
-                <thead><tr><th>#</th><th>Acción</th><th>Precio</th><th>Semana</th>
+                <thead><tr><th>Acción</th><th>Precio</th><th>Semana</th>
                   {run.strategy.columns.map(col => <th key={col.label} title={col.hint}>{col.label}</th>)}
-                  <th title="Rentabilidad por unidad de riesgo en el último año">Sharpe 1a</th><th/></tr></thead>
+                  <th title="Rentabilidad por unidad de riesgo en el último año">Sharpe 1a</th><th title="Elegida por el optimizador de Markowitz">Cartera</th></tr></thead>
                 <tbody>{scan.passing.slice(0, 12).map((r, i) => (
                   <tr key={r.ticker} tabIndex={0} aria-selected={r.ticker === selected} className={r.ticker === selected ? 'sel' : ''}
                     onClick={() => setSelTicker(r.ticker)} onKeyDown={e => { if(e.key === 'Enter' || e.key === ' '){ e.preventDefault(); setSelTicker(r.ticker); } }}>
-                    <td>{i + 1}</td><td><b>{r.ticker}</b></td><td>{num(r.price)}</td>
+                    <td className="tk" title={r.ticker}><b>{r.ticker}</b></td><td>{r.price >= 1000 ? Math.round(r.price).toLocaleString('es-ES') : num(r.price)}</td>
                     <td className={r.chg >= 0 ? 'up' : 'down'}>{pct(r.chg)}</td>
                     {r.values.map((v, k) => <td key={k}>{fmtCol(v, run.strategy.columns[k].fmt)}</td>)}
                     <td>{num(r.sharpe1y)}</td>
-                    <td>{inPortfolio.has(r.ticker) && <span className="simple-tag">En cartera</span>}</td>
+                    <td>{inPortfolio.has(r.ticker) && <span className="simple-tag" title="En cartera" aria-label="En cartera">✓</span>}</td>
                   </tr>))}</tbody>
               </table>
               <p className="simple-note">{`Haz clic en una fila para ver su gráfico.${scan.passing.length > 12 ? ` Y ${scan.passing.length - 12} acciones más.` : ''} Las ${Math.min(scan.passing.length, C.SIMPLE_CANDIDATES)} con mejor Sharpe del último año pasan al optimizador.`}</p></div>
@@ -395,15 +466,8 @@ window.StockScannerUI = window.StockScannerUI || {};
                   </div>
                 </div>
                 {weightView === 'stock'
-                  ? <Donut key="stock" title="Peso por acción" currency={cur} center={{ value: String(pf.allocations.length), label: 'acciones' }} items={(() => {
-                      const items = pf.allocations.map(a => ({ key: a.ticker, label: a.ticker, sub: a.shortName && a.shortName !== a.ticker ? a.shortName : sectorEs(a.sector), weight: Math.abs(a.weight) }));
-                      const cash = 1 - items.reduce((t, i) => t + i.weight, 0);
-                      // Con pocas acciones, el límite de 25 % por acción deja parte en efectivo.
-                      if(cash > 0.01) items.push({ key: 'cash', label: 'Efectivo', sub: 'límite de 25 % por acción', weight: cash, color: 'var(--text-3)' });
-                      return items;
-                    })()}/>
-                  : <Donut key="sector" title="Peso por sector" currency={cur} center={{ value: String((pf.sectors || []).length), label: 'sectores' }}
-                      items={(pf.sectors || []).map(sc => ({ key: sc.name, label: sectorEs(sc.name), sub: `${sc.count} acción${sc.count > 1 ? 'es' : ''}`, weight: sc.weight }))}/>}
+                  ? <Donut key="stock" title="Peso por acción" currency={cur} center={stockCenter} items={stockItems}/>
+                  : <Donut key="sector" title="Peso por sector" currency={cur} center={sectorCenter} items={sectorItems}/>}
               </div>
             </div>
           </section>}
